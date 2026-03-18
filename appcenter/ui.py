@@ -2814,9 +2814,21 @@ class MainWindow(Adw.ApplicationWindow):
             self.queue_logs = self.queue_logs[-400:]
         if hasattr(self, "queue_log_view"):
             buffer = self.queue_log_view.get_buffer()
-            buffer.set_text("\n".join(self.queue_logs))
+            end_iter = buffer.get_end_iter()
+            prefix = "" if buffer.get_char_count() == 0 else "\n"
+            buffer.insert(end_iter, prefix + line)
+            if buffer.get_line_count() > 400:
+                start = buffer.get_start_iter()
+                end = buffer.get_iter_at_line(1)
+                buffer.delete(start, end)
+            GLib.idle_add(self._scroll_to_bottom)
+            
+    def _scroll_to_bottom(self):
+        if hasattr(self, "queue_log_view"):
+            buffer = self.queue_log_view.get_buffer()
             end_iter = buffer.get_end_iter()
             self.queue_log_view.scroll_to_iter(end_iter, 0.0, False, 0.0, 1.0)
+        return False
 
     def _refresh_visible_list(self) -> None:
         visible, scroll_before = self._get_scroll_position_for_visible_page()
