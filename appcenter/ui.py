@@ -1746,6 +1746,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._rebuild_repo_page()
         self._populate_repo_filter_dropdown()
         self._switch_page(self.current_group, self.current_page)
+        if self.queue_items and not self.queue_worker_running:
+            self._start_queue_worker()
         return False
 
     def _fetch_news_text(self) -> str:
