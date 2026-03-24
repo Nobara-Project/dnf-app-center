@@ -1335,8 +1335,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_main_page()
         self._refresh_detail_action_button()
         self._switch_page('system', 'queue')
-        if not self.queue_worker_running:
-            self._start_queue_worker()
+        if self.backend and not self.queue_worker_running:
+            self._prompt_install()
 
     def _build_top_bar(self) -> Gtk.Widget:
         handle = Gtk.WindowHandle()
@@ -1747,7 +1747,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._populate_repo_filter_dropdown()
         self._switch_page(self.current_group, self.current_page)
         if self.queue_items and not self.queue_worker_running:
-            self._start_queue_worker()
+            GLib.idle_add(self._prompt_install)
         return False
 
     def _fetch_news_text(self) -> str:
@@ -3039,3 +3039,33 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_toast(self, message: str) -> None:
         self.toast_overlay.add_toast(Adw.Toast(title=message[:300]))
+        
+    def _prompt_install(self) -> bool:
+        if not self.queue_items or self.queue_worker_running:
+            return False
+
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading=_("Confirm Installation"),
+            body=f"You have {len(self.queue_items)} package(s) ready. Do you want to install them?",
+        )
+
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("install", _("Install"))
+
+        try:
+            dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
+        except AttributeError:
+            pass
+
+        def on_response(dlg, response):
+            if response == "install":
+                self._start_queue_worker()
+            else:
+                self.queue_items.clear()
+                self._refresh_queue_page()
+
+        dialog.connect("response", on_response)
+        dialog.present()
+        
+        return False
