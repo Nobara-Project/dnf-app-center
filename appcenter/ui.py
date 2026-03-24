@@ -1166,7 +1166,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.category_filter_entry.set_valign(Gtk.Align.CENTER)
         self.category_filter_entry.set_size_request(280, -1)
         self.category_filter_entry.set_visible(False)
-        self.category_filter_entry.connect("search-changed", self._on_category_filter_changed)
+        self.category_filter_entry.connect("activate", self._on_category_filter_changed)
         self.title_row.append(self.category_filter_entry)
 
         self.status_label = Gtk.Label(xalign=0)
@@ -1348,7 +1348,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.search_entry.set_placeholder_text(_("Search applications…"))
         self.search_entry.set_hexpand(False)
         self.search_entry.set_size_request(280, -1)
-        self.search_entry.connect("search-changed", self._on_search_changed)
+        self.search_entry.connect("activate", self._on_search_changed)
         bar.append(self.search_entry)
 
         self.repo_filter_combo = Gtk.ComboBoxText()
