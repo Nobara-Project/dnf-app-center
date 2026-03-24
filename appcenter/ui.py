@@ -909,11 +909,16 @@ class AppCardRow(Gtk.ListBoxRow):
         self._update_toggle_cb = update_toggle_cb
         self.add_css_class("app-list-row")
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        # Container for content + separator
+        container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_child(container)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         outer.set_valign(Gtk.Align.CENTER)
-        outer.add_css_class("app-card")
+        outer.add_css_class("app-card-compact")
         outer.set_hexpand(True)
-        self.set_child(outer)
+        outer.set_margin_start(10)
+        container.append(outer)
 
         if self._page_mode == "updates":
             self.update_check = Gtk.CheckButton()
@@ -925,30 +930,14 @@ class AppCardRow(Gtk.ListBoxRow):
         else:
             self.update_check = None
 
-        outer.append(IconWidget(app, 92))
-
-        text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        text_col.set_hexpand(True)
-        text_col.set_valign(Gtk.Align.CENTER)
-        outer.append(text_col)
-
         self.title_label = Gtk.Label(xalign=0)
         self.title_label.add_css_class("app-title")
         self.title_label.set_wrap(False)
         self.title_label.set_single_line_mode(True)
         self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.title_label.set_text(app.name)
-        text_col.append(self.title_label)
-
-        self.summary_label = Gtk.Label(xalign=0)
-        self.summary_label.add_css_class("app-summary")
-        self.summary_label.set_wrap(True)
-        self.summary_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self.summary_label.set_lines(2)
-        self.summary_label.set_max_width_chars(34)
-        self.summary_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.summary_label.set_text(app.summary)
-        text_col.append(self.summary_label)
+        self.title_label.set_hexpand(True)
+        outer.append(self.title_label)
 
         button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         button_box.set_valign(Gtk.Align.CENTER)
@@ -956,21 +945,36 @@ class AppCardRow(Gtk.ListBoxRow):
         outer.append(button_box)
 
         self.action_button = Gtk.Button()
+        self.action_button.set_size_request(24, 24)
+        self.action_button.add_css_class("flat")
         self.action_button.connect("clicked", lambda *_: self._action_cb(self.app))
         button_box.append(self.action_button)
+
+        # Add separator line at bottom
+        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        separator.add_css_class("list-row-separator")
+        container.append(separator)
+
         self.refresh()
 
     def refresh(self) -> None:
         queue_state = self._queue_state_cb(self.app)
         if queue_state is not None:
-            self.action_button.set_label(queue_state)
+            self.action_button.set_icon_name("emblem-synchronizing-symbolic")
             self.action_button.set_sensitive(False)
+            self.action_button.set_tooltip_text(queue_state)
         else:
             self.action_button.set_sensitive(True)
             if self._page_mode == "updates":
-                self.action_button.set_label("Update")
+                self.action_button.set_icon_name("software-update-available-symbolic")
+                self.action_button.set_tooltip_text(_("Update"))
             else:
-                self.action_button.set_label(_("Remove") if self.app.installed else _("Install"))
+                if self.app.installed:
+                    self.action_button.set_icon_name("list-remove-symbolic")
+                    self.action_button.set_tooltip_text(_("Remove"))
+                else:
+                    self.action_button.set_icon_name("list-add-symbolic")
+                    self.action_button.set_tooltip_text(_("Install"))
         self.action_button.remove_css_class("destructive-action")
         self.action_button.remove_css_class("suggested-action")
         if self._page_mode == "updates":
@@ -1042,6 +1046,8 @@ class AppCardTile(Gtk.Box):
         self.append(button_box)
 
         self.action_button = Gtk.Button()
+        self.action_button.set_size_request(24, 24)
+        self.action_button.add_css_class("flat")
         self.action_button.connect("clicked", lambda *_: self._action_cb(self.app))
         button_box.append(self.action_button)
 
@@ -1053,14 +1059,21 @@ class AppCardTile(Gtk.Box):
     def refresh(self) -> None:
         queue_state = self._queue_state_cb(self.app)
         if queue_state is not None:
-            self.action_button.set_label(queue_state)
+            self.action_button.set_icon_name("emblem-synchronizing-symbolic")
             self.action_button.set_sensitive(False)
+            self.action_button.set_tooltip_text(queue_state)
         else:
             self.action_button.set_sensitive(True)
             if self._page_mode == "updates":
-                self.action_button.set_label("Update")
+                self.action_button.set_icon_name("software-update-available-symbolic")
+                self.action_button.set_tooltip_text(_("Update"))
             else:
-                self.action_button.set_label(_("Remove") if self.app.installed else _("Install"))
+                if self.app.installed:
+                    self.action_button.set_icon_name("list-remove-symbolic")
+                    self.action_button.set_tooltip_text(_("Remove"))
+                else:
+                    self.action_button.set_icon_name("list-add-symbolic")
+                    self.action_button.set_tooltip_text(_("Install"))
         self.action_button.remove_css_class("destructive-action")
         self.action_button.remove_css_class("suggested-action")
         if self._page_mode == "updates":
@@ -1101,6 +1114,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.current_subcategory_page = 0
         self._page_items_cache: dict[tuple, list[AppEntry]] = {}
         self._data_revision = 0
+        self.view_mode = "grid"  # Can be "grid" or "list"
 
         provider = Gtk.CssProvider()
         provider.load_from_bytes(GLib.Bytes.new(CSS))
@@ -1168,6 +1182,28 @@ class MainWindow(Adw.ApplicationWindow):
         self.category_filter_entry.set_visible(False)
         self.category_filter_entry.connect("activate", self._on_category_filter_changed)
         self.title_row.append(self.category_filter_entry)
+
+        # View mode toggle buttons
+        self.view_toggle_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.view_toggle_box.add_css_class("linked")
+        self.view_toggle_box.set_hexpand(False)
+        self.view_toggle_box.set_halign(Gtk.Align.END)
+        self.view_toggle_box.set_valign(Gtk.Align.CENTER)
+        self.view_toggle_box.set_visible(False)
+        self.title_row.append(self.view_toggle_box)
+
+        self.grid_view_button = Gtk.ToggleButton()
+        self.grid_view_button.set_icon_name("view-grid-symbolic")
+        self.grid_view_button.set_tooltip_text(_("Grid View"))
+        self.grid_view_button.set_active(True)
+        self.grid_view_button.connect("toggled", self._on_grid_view_toggled)
+        self.view_toggle_box.append(self.grid_view_button)
+
+        self.list_view_button = Gtk.ToggleButton()
+        self.list_view_button.set_icon_name("view-list-symbolic")
+        self.list_view_button.set_tooltip_text(_("List View"))
+        self.list_view_button.connect("toggled", self._on_list_view_toggled)
+        self.view_toggle_box.append(self.list_view_button)
 
         self.status_label = Gtk.Label(xalign=0)
         self.status_label.add_css_class("dim-label")
@@ -1979,6 +2015,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.current_category_filter_text = entry.get_text().strip()
         self._refresh_main_page(preserve_scroll=False)
 
+    def _on_grid_view_toggled(self, button: Gtk.ToggleButton) -> None:
+        if button.get_active() and self.view_mode != "grid":
+            self.view_mode = "grid"
+            self.list_view_button.set_active(False)
+            self._refresh_main_page(preserve_scroll=False)
+
+    def _on_list_view_toggled(self, button: Gtk.ToggleButton) -> None:
+        if button.get_active() and self.view_mode != "list":
+            self.view_mode = "list"
+            self.grid_view_button.set_active(False)
+            self._refresh_main_page(preserve_scroll=False)
+
     def _on_repo_filter_changed(self, combo: Gtk.ComboBoxText) -> None:
         self.current_repo_filter = combo.get_active_id() or "__all__"
         self._refresh_main_page()
@@ -2106,6 +2154,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         show_local_filter = (not in_search_mode and ((self.current_group == "categories") or (self.current_group == "system" and self.current_page in {"installed", "updates"})))
         self.category_filter_entry.set_visible(show_local_filter)
+        self.view_toggle_box.set_visible(show_local_filter)
 
         items = self._filtered_apps_for_current_page()
         self.current_items = items
@@ -2290,7 +2339,7 @@ class MainWindow(Adw.ApplicationWindow):
         items = items or []
         self.empty_status.set_visible(not items)
         update_mode = self.current_group == "system" and self.current_page == "updates" and not self.current_search_text
-        compact_grid = True
+        compact_grid = (self.view_mode == "grid")
         cols = 3
         if not compact_grid:
             for app in items:
