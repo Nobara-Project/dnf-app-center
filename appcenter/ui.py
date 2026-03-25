@@ -413,7 +413,7 @@ windowhandle > box.top-bar {
   margin-right: 6px;
 }
 .subcat-strip {
-  padding: 4px 0 10px 0;
+  padding: 4px 0 10px 10px;
   min-width: 0;
 }
 .subcat-strip > box {
