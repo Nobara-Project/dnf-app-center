@@ -368,14 +368,19 @@ class DnfBackend:
                 self._ingest_pkg_into_cache(cache, installed_pkg, installed=True)
 
         items = list(cache.values())
-        # Filter out packages where installed version matches candidate version exactly
-        # This prevents showing "updates" for packages installed from @commandline or other repos
-        # when the same version is available in a different repo
+        # Filter out packages where:
+        # 1. Installed version matches candidate version exactly (same version from different repo)
+        # 2. Candidate version is older than installed (downgrade, not update)
         filtered_items = []
         for app in items:
-            # Skip if both versions are present and match exactly
             if app.installed_version and app.candidate_version:
+                # Skip if versions match exactly
                 if app.installed_version == app.candidate_version:
+                    continue
+                # Skip if candidate is actually older (downgrade)
+                # This happens when a higher version was installed from @commandline
+                # but repo priority wants to "upgrade" to an older repo version
+                if self._compare_evr(app.candidate_version, app.installed_version) < 0:
                     continue
             filtered_items.append(app)
         filtered_items.sort(key=lambda app: app.name.casefold())
@@ -1087,6 +1092,48 @@ class DnfBackend:
             if value:
                 return str(value)
         return None
+
+    def _compare_evr(self, evr1: str, evr2: str) -> int:
+        """Compare two EVR strings.
+
+        Returns:
+            -1 if evr1 < evr2 (evr1 is older)
+             0 if evr1 == evr2 (same version)
+             1 if evr1 > evr2 (evr1 is newer)
+        """
+        # Try using the rpm module for proper version comparison
+        try:
+            import rpm
+            # rpm.labelCompare expects tuples of (epoch, version, release)
+            # Parse EVR strings into components
+            def parse_evr(evr_str):
+                if ':' in evr_str:
+                    epoch, vr = evr_str.split(':', 1)
+                    epoch = epoch or '0'
+                else:
+                    epoch = '0'
+                    vr = evr_str
+                if '-' in vr:
+                    parts = vr.rsplit('-', 1)
+                    version = parts[0]
+                    release = parts[1] if len(parts) > 1 else ''
+                else:
+                    version = vr
+                    release = ''
+                return (epoch, version, release)
+
+            evr1_tuple = parse_evr(evr1)
+            evr2_tuple = parse_evr(evr2)
+            return rpm.labelCompare(evr1_tuple, evr2_tuple)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # Fallback: simple string comparison (not accurate for all cases)
+        if evr1 == evr2:
+            return 0
+        return 1 if evr1 > evr2 else -1
 
     def _get_pkg_evr(self, pkg) -> str | None:
         if pkg is None:
