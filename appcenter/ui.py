@@ -343,16 +343,17 @@ windowhandle > box.top-bar {
   background: mix(@window_bg_color, @headerbar_bg_color, 0.8);
 }
 .sidebar {
-  margin: 12px 10px 12px 12px;
-  padding: 0 6px 8px 6px;
-  border-radius: 4px;
-  background: @sidebar_backdrop_color;
-  border: 1px solid mix(currentColor, @window_bg_color, 0.86);
+  margin: 0;
+  padding: 12px 6px 8px 12px;
+  background: transparent;
+  border: 0;
 }
 .sidebar-section {
   margin: 0;
-  font-weight: 700;
-  font-size: 1.3rem;
+  font-weight: 400;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  color: alpha(currentColor, 0.5);
 }
 .sidebar-section-box {
   margin: 0;
@@ -383,9 +384,9 @@ windowhandle > box.top-bar {
   font-weight: 700;
 }
 .nav-button.active > box {
-  background: mix(currentColor, @window_bg_color, 0.9);
-  margin-left: 4px;
-  padding: 12px 14px;
+  background: transparent;
+  margin-left: 0;
+  padding: 12px 8px;
 }
 .nav-button.active .nav-label {
   font-weight: bold;
@@ -413,7 +414,7 @@ windowhandle > box.top-bar {
   margin-right: 6px;
 }
 .subcat-strip {
-  padding: 4px 0 10px 10px;
+  padding: 4px 0 10px 0;
   min-width: 0;
 }
 .subcat-strip > box {
@@ -447,7 +448,9 @@ windowhandle > box.top-bar {
   background: transparent;
 }
 .subcategory-chip.active {
-  background-color: @window_bg_color;
+  background-color: transparent;
+  padding: 8px 0;
+  border-radius: 0;
 }
 .subcategory-label {
   font-weight: 400;
@@ -855,12 +858,14 @@ class IconWidget(Gtk.Box):
 
 
 class NavSidebarButton(Gtk.Button):
-    def __init__(self, title: str, callback, icon_name: str | None = None):
+    def __init__(self, title: str, callback, icon_name: str | None = None, indent: bool = False):
         super().__init__()
         self.set_halign(Gtk.Align.START)
         self.set_has_frame(False)
         self.add_css_class("flat")
         self.add_css_class("nav-button")
+        if indent:
+            self.set_margin_start(10)
 
         inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         inner.set_halign(Gtk.Align.START)
@@ -1525,13 +1530,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar_box.append(self._section_label(_("System")))
         for key, title in CATEGORY_GROUPS["system"].items():
             icon = CATEGORY_ICONS["system"].get(key)
-            self.sidebar_box.append(self._nav_button(key, title, "system", icon))
+            self.sidebar_box.append(self._nav_button(key, title, "system", icon, indent=True))
 
-        self.sidebar_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        separator.set_margin_start(10)
+        separator.set_margin_end(10)
+        self.sidebar_box.append(separator)
         self.sidebar_box.append(self._section_label(_("Categories")))
         for key, title in CATEGORY_GROUPS["categories"].items():
             icon = CATEGORY_ICONS["categories"].get(key)
-            self.sidebar_box.append(self._nav_button(key, title, "categories", icon))
+            self.sidebar_box.append(self._nav_button(key, title, "categories", icon, indent=True))
 
     def _section_label(self, text: str) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
@@ -1541,8 +1549,8 @@ class MainWindow(Adw.ApplicationWindow):
         box.append(label)
         return box
 
-    def _nav_button(self, key: str, title: str, group: str, icon_name: str | None = None) -> Gtk.Widget:
-        button = NavSidebarButton(title, lambda: self._switch_page(group, key), icon_name)
+    def _nav_button(self, key: str, title: str, group: str, icon_name: str | None = None, indent: bool = False) -> Gtk.Widget:
+        button = NavSidebarButton(title, lambda: self._switch_page(group, key), icon_name, indent)
         self.nav_buttons[f"{group}:{key}"] = button
         return button
 
