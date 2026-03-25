@@ -160,17 +160,14 @@ class DnfBackend:
         installed_q = self.libdnf5.rpm.PackageQuery(self.base)
         installed_q.filter_name([pkg_name])
         installed_q.filter_installed()
+
         # For packages with multiple versions installed (e.g., kernels),
-        # we want the newest one to compare against available updates
+        # use filter_latest_evr to get only the newest version(s)
         try:
             installed_q.filter_latest_evr()
         except TypeError:
-            try:
-                installed_q.filter_latest_evr(True)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            installed_q.filter_latest_evr(True)
+
         return next(iter(installed_q), None)
 
     def _available_packages_for_name(self, pkg_name: str, repo_id: str = "__all__", preferred_arch: str | None = None) -> list:
@@ -374,9 +371,15 @@ class DnfBackend:
         # Filter out packages where installed version matches candidate version exactly
         # This prevents showing "updates" for packages installed from @commandline or other repos
         # when the same version is available in a different repo
-        items = [app for app in items if app.installed_version != app.candidate_version]
-        items.sort(key=lambda app: app.name.casefold())
-        return items
+        filtered_items = []
+        for app in items:
+            # Skip if both versions are present and match exactly
+            if app.installed_version and app.candidate_version:
+                if app.installed_version == app.candidate_version:
+                    continue
+            filtered_items.append(app)
+        filtered_items.sort(key=lambda app: app.name.casefold())
+        return filtered_items
 
 
     def _resolve_upgrade_transaction(self):
