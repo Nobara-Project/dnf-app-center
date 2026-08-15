@@ -66,7 +66,14 @@ _UPDATER_SERVICE_OBJECT_PATH = "/org/dnf/AppCenter/UpdateService"
 def _notify_updater_service_refresh() -> None:
     """Best-effort nudge to the systray daemon so it drops a stale update
     count immediately instead of waiting for its next scheduled check or a
-    logout/login. Silently does nothing if the daemon isn't running."""
+    logout/login. Silently does nothing if the daemon isn't running.
+
+    Passes refresh=False: the packages we just changed are already
+    reflected in the local rpm/dnf state, so recomputing the upgradable
+    set doesn't need a repo metadata refetch, and -- unlike refresh=True,
+    which the daemon treats as an explicit "Check for Updates" click --
+    it still honors the user's "disabled" updater setting instead of
+    reactivating the indicator/notification behind their back."""
     try:
         proxy = Gio.DBusProxy.new_for_bus_sync(
             Gio.BusType.SESSION,
@@ -79,7 +86,7 @@ def _notify_updater_service_refresh() -> None:
         )
         proxy.call_sync(
             "RefreshUpdates",
-            GLib.Variant("(b)", (True,)),
+            GLib.Variant("(b)", (False,)),
             Gio.DBusCallFlags.NONE,
             2000,
             None,
