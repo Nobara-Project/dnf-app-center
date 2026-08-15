@@ -191,7 +191,7 @@ class Updater:
                 # more pass right after the in-flight one finishes instead
                 # of silently dropping it; `True` (forced metadata reload)
                 # wins over `False` if requests of both kinds pile up.
-                self._refresh_pending = bool(self._refresh_pending) or refresh
+                self._refresh_pending = self._refresh_pending or refresh
                 return False
             self._refreshing = True
 

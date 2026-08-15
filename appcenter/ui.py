@@ -73,26 +73,33 @@ def _notify_updater_service_refresh() -> None:
     set doesn't need a repo metadata refetch, and -- unlike refresh=True,
     which the daemon treats as an explicit "Check for Updates" click --
     it still honors the user's "disabled" updater setting instead of
-    reactivating the indicator/notification behind their back."""
-    try:
-        proxy = Gio.DBusProxy.new_for_bus_sync(
-            Gio.BusType.SESSION,
-            Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES | Gio.DBusProxyFlags.DO_NOT_CONNECT_SIGNALS,
-            None,
-            _UPDATER_SERVICE_BUS_NAME,
-            _UPDATER_SERVICE_OBJECT_PATH,
-            _UPDATER_SERVICE_BUS_NAME,
-            None,
-        )
-        proxy.call_sync(
-            "RefreshUpdates",
-            GLib.Variant("(b)", (False,)),
-            Gio.DBusCallFlags.NONE,
-            2000,
-            None,
-        )
-    except GLib.Error:
-        pass
+    reactivating the indicator/notification behind their back.
+
+    Runs the actual D-Bus round-trip (bus_get_sync + call_sync, each with
+    their own internal timeouts on top of the explicit 2s call timeout)
+    on a background thread, matching every other blocking call in this
+    file: this is called from _queue_worker_done(), which only ever runs
+    via GLib.idle_add on the GTK main thread, so doing the call there
+    directly could stall the whole window's UI if the tray daemon is
+    slow or the session bus is momentarily busy."""
+    def worker() -> None:
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            bus.call_sync(
+                _UPDATER_SERVICE_BUS_NAME,
+                _UPDATER_SERVICE_OBJECT_PATH,
+                _UPDATER_SERVICE_BUS_NAME,
+                "RefreshUpdates",
+                GLib.Variant("(b)", (False,)),
+                None,
+                Gio.DBusCallFlags.NONE,
+                2000,
+                None,
+            )
+        except GLib.Error:
+            pass
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 class _NewsHTMLToMarkupParser(HTMLParser):
