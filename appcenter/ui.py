@@ -56,6 +56,37 @@ from .i18n import _
 from .updater_config import load_updater_settings, save_updater_settings, VALID_UNITS, save_view_mode, get_view_mode
 from .models import AppEntry, should_hide_from_standard_catalog
 
+# Must match BUS_NAME/OBJECT_PATH in updater_service.py. Duplicated as plain
+# strings rather than imported so this module doesn't inherit that module's
+# hard dependency on the AppIndicator3/AyatanaAppIndicator3 GI typelib.
+_UPDATER_SERVICE_BUS_NAME = "org.dnf.AppCenter.UpdateService"
+_UPDATER_SERVICE_OBJECT_PATH = "/org/dnf/AppCenter/UpdateService"
+
+
+def _notify_updater_service_refresh() -> None:
+    """Best-effort nudge to the systray daemon so it drops a stale update
+    count immediately instead of waiting for its next scheduled check or a
+    logout/login. Silently does nothing if the daemon isn't running."""
+    try:
+        proxy = Gio.DBusProxy.new_for_bus_sync(
+            Gio.BusType.SESSION,
+            Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES | Gio.DBusProxyFlags.DO_NOT_CONNECT_SIGNALS,
+            None,
+            _UPDATER_SERVICE_BUS_NAME,
+            _UPDATER_SERVICE_OBJECT_PATH,
+            _UPDATER_SERVICE_BUS_NAME,
+            None,
+        )
+        proxy.call_sync(
+            "RefreshUpdates",
+            GLib.Variant("(b)", (True,)),
+            Gio.DBusCallFlags.NONE,
+            2000,
+            None,
+        )
+    except GLib.Error:
+        pass
+
 
 class _NewsHTMLToMarkupParser(HTMLParser):
     def __init__(self) -> None:
@@ -2972,6 +3003,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Refresh updates after queue completes
         if had_items and done_count:
             self._load_async(force=True)
+            _notify_updater_service_refresh()
 
         return False
 
