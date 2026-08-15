@@ -268,9 +268,15 @@ def _run_transaction(libdnf5, base, action: str, pkg_name: str | list[str]) -> t
 
     emit("log", message=f"Resolving transaction for {description}...")
     transaction = goal.resolve()
-    problems = list(transaction.get_problems() or [])
-    if problems:
-        return False, "\n".join(str(problem) for problem in problems)
+    # get_problems() returns a GoalProblem overview code (an int, 0 = no
+    # problem), not an iterable of problems -- list()'ing it raises
+    # TypeError. The human-readable messages live in the resolve logs.
+    if transaction.get_problems():
+        try:
+            logs = [str(log) for log in transaction.get_resolve_logs_as_strings() or []]
+        except Exception:
+            logs = []
+        return False, "\n".join(logs) if logs else "Transaction resolution failed."
 
     try:
         emit("log", message=f"Downloading packages for {description}...")
