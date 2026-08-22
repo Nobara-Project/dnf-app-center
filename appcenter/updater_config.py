@@ -10,6 +10,7 @@ DEFAULT_SETTINGS = {
     'notifications': True,
     'interval_value': 12,
     'interval_unit': 'hours',
+    'update_flatpaks': False,
     'update_feed_url': DEFAULT_UPDATE_FEED_URL,
 }
 
@@ -40,6 +41,7 @@ def load_updater_settings() -> dict:
     settings['interval_unit'] = unit
     settings['enabled'] = bool(settings.get('enabled', DEFAULT_SETTINGS['enabled']))
     settings['notifications'] = bool(settings.get('notifications', DEFAULT_SETTINGS['notifications']))
+    settings['update_flatpaks'] = bool(settings.get('update_flatpaks', DEFAULT_SETTINGS['update_flatpaks']))
     feed_url = str(settings.get('update_feed_url', DEFAULT_SETTINGS['update_feed_url']) or DEFAULT_SETTINGS['update_feed_url']).strip()
     settings['update_feed_url'] = feed_url or DEFAULT_SETTINGS['update_feed_url']
     return settings

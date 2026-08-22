@@ -1280,6 +1280,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.update_flatpaks_check = Gtk.CheckButton(label=_("Also update flatpaks"))
         self.update_flatpaks_check.set_valign(Gtk.Align.CENTER)
         self.update_flatpaks_check.set_tooltip_text(_("Append --all to nobara-sync for this system update."))
+        self.update_flatpaks_check.set_active(bool(self.updater_settings.get("update_flatpaks", False)))
+        self.update_flatpaks_check.connect("toggled", self._on_update_flatpaks_toggled)
         self.updates_action_bar.append(self.update_flatpaks_check)
 
         # News panel toggle button
@@ -1543,6 +1545,10 @@ class MainWindow(Adw.ApplicationWindow):
             "interval_unit": self.updater_interval_unit.get_active_id() or "hours",
         }
         save_updater_settings(settings)
+        self.updater_settings = load_updater_settings()
+
+    def _on_update_flatpaks_toggled(self, button: Gtk.CheckButton) -> None:
+        save_updater_settings({"update_flatpaks": button.get_active()})
         self.updater_settings = load_updater_settings()
 
     def _build_sidebar(self) -> None:
