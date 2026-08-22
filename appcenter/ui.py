@@ -1277,6 +1277,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.update_all_button.connect("clicked", lambda *_: self._queue_system_update())
         self.updates_action_bar.append(self.update_all_button)
 
+        self.update_flatpaks_check = Gtk.CheckButton(label=_("Also update flatpaks"))
+        self.update_flatpaks_check.set_valign(Gtk.Align.CENTER)
+        self.update_flatpaks_check.set_tooltip_text(_("Append --all to nobara-sync for this system update."))
+        self.updates_action_bar.append(self.update_flatpaks_check)
+
         # News panel toggle button
         self.news_toggle_button = Gtk.ToggleButton()
         self.news_toggle_button.set_icon_name("starred-symbolic")
@@ -2754,6 +2759,9 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _queue_system_update(self) -> None:
+        update_flatpaks_check = getattr(self, "update_flatpaks_check", None)
+        include_flatpaks = bool(update_flatpaks_check and update_flatpaks_check.get_active())
+
         # First, select all update items for visual feedback
         items = [app for app in self.current_items if app.primary_pkg]
         for app in items:
@@ -2773,9 +2781,13 @@ class MainWindow(Adw.ApplicationWindow):
                 description="",
                 pkg_names=[],
             )
-            item = QueueItem(base_app, action="system-update", message="Queued system update", pkg_names=[], label=_("System Update"))
+            sync_args = ["--all"] if include_flatpaks else []
+            label = _("System Update + Flatpaks") if include_flatpaks else _("System Update")
+            message = "Queued system update with Flatpaks" if include_flatpaks else "Queued system update"
+            item = QueueItem(base_app, action="system-update", message=message, pkg_names=sync_args, label=label)
             self.queue_items.append(item)
-            self._append_queue_log("Queued system update via nobara-sync cli")
+            command_label = "nobara-sync cli --all" if include_flatpaks else "nobara-sync cli"
+            self._append_queue_log(f"Queued system update via {command_label}")
             self.status_label.set_text(self._queue_status_text())
             self._refresh_queue_page()
             self._refresh_main_page()
@@ -2834,7 +2846,7 @@ class MainWindow(Adw.ApplicationWindow):
                     GLib.idle_add(self._handle_queue_event, item, payload)
 
                 if item.action == "system-update":
-                    target = []
+                    target = item.pkg_names
                 elif item.action == 'install-rpms':
                     target = item.file_paths
                 else:

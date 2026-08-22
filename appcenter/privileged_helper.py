@@ -199,14 +199,20 @@ def _run_rpm_file_install(paths: list[str]) -> tuple[bool, str]:
     return False, '\n'.join(output_lines) or f'RPM install failed with exit code {rc}.'
 
 
-def _run_system_update() -> tuple[bool, str]:
-    emit("log", message="Running system update via nobara-sync cli...")
+def _system_update_args(pkg_name: str | list[str]) -> list[str]:
+    pkg_names = [pkg_name] if isinstance(pkg_name, str) else list(pkg_name)
+    return ["--all"] if "--all" in {str(pkg) for pkg in pkg_names} else []
+
+
+def _run_system_update(sync_args: list[str] | None = None) -> tuple[bool, str]:
+    sync_cmd = ["nobara-sync", "cli", *(sync_args or [])]
+    emit("log", message=f"Running system update via {' '.join(sync_cmd)}...")
     target_home = os.environ.get("HOME", "/root")
     cmd = [
         "/usr/bin/env",
         f"HOME={target_home}",
         f"XDG_DATA_HOME={target_home}/.local/share",
-        "nobara-sync", "cli"
+        *sync_cmd,
     ]
     try:
         process = subprocess.Popen(
@@ -241,7 +247,7 @@ def _run_system_update() -> tuple[bool, str]:
 
 def _run_transaction(libdnf5, base, action: str, pkg_name: str | list[str]) -> tuple[bool, str]:
     if action == "system-update":
-        return _run_system_update()
+        return _run_system_update(sync_args=_system_update_args(pkg_name))
 
     goal = libdnf5.base.Goal(base)
     pkg_names = [pkg_name] if isinstance(pkg_name, str) else [pkg for pkg in pkg_name if pkg]

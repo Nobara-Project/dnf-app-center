@@ -845,7 +845,7 @@ class DnfBackend:
 
     def _run_local_action(self, action: str, pkg_name: str | list[str], event_cb: Callable[[dict], None] | None = None) -> tuple[bool, str]:
         if action == "system-update":
-            return self._run_nobara_sync_cli(event_cb=event_cb)
+            return self._run_nobara_sync_cli(sync_args=self._system_update_args(pkg_name), event_cb=event_cb)
 
         goal = self.libdnf5.base.Goal(self.base)
         pkg_names = [pkg_name] if isinstance(pkg_name, str) else [pkg for pkg in pkg_name if pkg]
@@ -1001,10 +1001,14 @@ class DnfBackend:
         return self.execute_action("update", pkg_names)
 
 
-    def _run_nobara_sync_cli(self, event_cb: Callable[[dict], None] | None = None) -> tuple[bool, str]:
-        cmd = ["nobara-sync", "cli"]
+    def _system_update_args(self, pkg_name: str | list[str]) -> list[str]:
+        pkg_names = [pkg_name] if isinstance(pkg_name, str) else list(pkg_name)
+        return ["--all"] if "--all" in {str(pkg) for pkg in pkg_names} else []
+
+    def _run_nobara_sync_cli(self, sync_args: list[str] | None = None, event_cb: Callable[[dict], None] | None = None) -> tuple[bool, str]:
+        cmd = ["nobara-sync", "cli", *(sync_args or [])]
         if event_cb is not None:
-            event_cb({"event": "log", "message": "Running system update via nobara-sync cli..."})
+            event_cb({"event": "log", "message": f"Running system update via {' '.join(cmd)}..."})
         try:
             proc = subprocess.Popen(
                 cmd,
