@@ -3026,6 +3026,8 @@ class MainWindow(Adw.ApplicationWindow):
             if buffer.get_line_count() > 400:
                 start = buffer.get_start_iter()
                 end = buffer.get_iter_at_line(1)
+                if isinstance(end, tuple):
+                    _ok, end = end
                 buffer.delete(start, end)
             GLib.idle_add(self._scroll_to_bottom)
             
