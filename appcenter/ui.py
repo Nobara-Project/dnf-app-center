@@ -56,6 +56,51 @@ from .i18n import _
 from .updater_config import load_updater_settings, save_updater_settings, VALID_UNITS, save_view_mode, get_view_mode
 from .models import AppEntry, should_hide_from_standard_catalog
 
+# Must match BUS_NAME/OBJECT_PATH in updater_service.py. Duplicated as plain
+# strings rather than imported so this module doesn't inherit that module's
+# hard dependency on the AppIndicator3/AyatanaAppIndicator3 GI typelib.
+_UPDATER_SERVICE_BUS_NAME = "org.dnf.AppCenter.UpdateService"
+_UPDATER_SERVICE_OBJECT_PATH = "/org/dnf/AppCenter/UpdateService"
+
+
+def _notify_updater_service_refresh() -> None:
+    """Best-effort nudge to the systray daemon so it drops a stale update
+    count immediately instead of waiting for its next scheduled check or a
+    logout/login. Silently does nothing if the daemon isn't running.
+
+    Passes refresh=False: the packages we just changed are already
+    reflected in the local rpm/dnf state, so recomputing the upgradable
+    set doesn't need a repo metadata refetch, and -- unlike refresh=True,
+    which the daemon treats as an explicit "Check for Updates" click --
+    it still honors the user's "disabled" updater setting instead of
+    reactivating the indicator/notification behind their back.
+
+    Runs the actual D-Bus round-trip (bus_get_sync + call_sync, each with
+    their own internal timeouts on top of the explicit 2s call timeout)
+    on a background thread, matching every other blocking call in this
+    file: this is called from _queue_worker_done(), which only ever runs
+    via GLib.idle_add on the GTK main thread, so doing the call there
+    directly could stall the whole window's UI if the tray daemon is
+    slow or the session bus is momentarily busy."""
+    def worker() -> None:
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            bus.call_sync(
+                _UPDATER_SERVICE_BUS_NAME,
+                _UPDATER_SERVICE_OBJECT_PATH,
+                _UPDATER_SERVICE_BUS_NAME,
+                "RefreshUpdates",
+                GLib.Variant("(b)", (False,)),
+                None,
+                Gio.DBusCallFlags.NONE,
+                2000,
+                None,
+            )
+        except GLib.Error:
+            pass
+
+    threading.Thread(target=worker, daemon=True).start()
+
 
 class _NewsHTMLToMarkupParser(HTMLParser):
     def __init__(self) -> None:
@@ -2990,6 +3035,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Refresh updates after queue completes
         if had_items and done_count:
             self._load_async(force=True)
+            _notify_updater_service_refresh()
 
         return False
 

@@ -164,6 +164,7 @@ class Updater:
         self.notification = Notification()
         self._lock = threading.Lock()
         self._refreshing = False
+        self._refresh_pending: bool | None = None
         self._last_check_monotonic = 0.0
 
     def _check_updates(self, refresh: bool) -> int:
@@ -183,6 +184,14 @@ class Updater:
             return False
         with self._lock:
             if self._refreshing:
+                # A check is already running and may have captured state
+                # from before whatever just triggered this call (e.g. a
+                # transaction that finished mid-check), so it can't be
+                # trusted to reflect this request. Remember to run one
+                # more pass right after the in-flight one finishes instead
+                # of silently dropping it; `True` (forced metadata reload)
+                # wins over `False` if requests of both kinds pile up.
+                self._refresh_pending = self._refresh_pending or refresh
                 return False
             self._refreshing = True
 
@@ -196,8 +205,14 @@ class Updater:
                 LOGGER.exception("Failed checking for updates")
                 GLib.idle_add(self._apply_update_count, 0)
             finally:
+                pending = None
                 with self._lock:
                     self._refreshing = False
+                    if self._refresh_pending is not None:
+                        pending = self._refresh_pending
+                        self._refresh_pending = None
+                if pending is not None:
+                    GLib.idle_add(self.refresh_updates, pending)
 
         threading.Thread(target=worker, daemon=True).start()
         return False
