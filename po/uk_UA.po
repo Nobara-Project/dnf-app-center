@@ -1,0 +1,239 @@
+#
+# Dymko <Dymkovych@proton.me>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: org.dnf.AppCenter 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-03-14 00:00+0000\n"
+"PO-Revision-Date: 2026-04-11 17:20+0300\n"
+"Last-Translator: Dymko <Dymkovych@proton.me>\n"
+"Language-Team: Ukrainian\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: uk\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n != 0 ? 1 : "
+"2);\n"
+"X-Generator: Gtranslator 50.0\n"
+
+msgid "Audio & Video"
+msgstr "Звук та відео"
+
+msgid "Browse and install Fedora applications with libdnf5 and AppStream"
+msgstr "Переглядайте й встановлюйте застосунки Fedora через libdnf5 і AppStream"
+
+msgid "Categories"
+msgstr "Категорії"
+
+msgid "Check every"
+msgstr "Кожні"
+
+msgid "Check for Updates"
+msgstr "Пошук оновлень"
+
+msgid ""
+"Checks for package updates and shows a tray icon when updates are available"
+msgstr ""
+"Перевіряє оновлення пакунків і показує значок на панелі, якщо вони доступні"
+
+msgid "Clear Selection"
+msgstr "Очистити вибір"
+
+msgid "Close"
+msgstr "Закрити"
+
+msgid "Copied to clipboard"
+msgstr "Скопійовано в буфер обміну"
+
+msgid "Copy"
+msgstr "Копіювати"
+
+msgid "DNF App Center"
+msgstr "Центр застосунків DNF"
+
+msgid "DNF App Center Updater"
+msgstr "Оновлювач Центру застосунків DNF"
+
+msgid "Developer Tools"
+msgstr "Розробка"
+
+msgid "Education"
+msgstr "Освіта"
+
+msgid "Enable update checker"
+msgstr "Увімкнути перевірку оновлень"
+
+msgid "Failed to load metadata."
+msgstr "Не вдалося завантажити метадані."
+
+msgid "Games"
+msgstr "Ігри"
+
+msgid "Graphics & Photography"
+msgstr "Дизайн та мистецтво"
+
+msgid "Install"
+msgstr "Встановити"
+
+msgid "Install local RPM files"
+msgstr "Встановити локальні RPM-файли"
+
+msgid "Installed"
+msgstr "Встановлено"
+
+msgid "Latest news and announcements."
+msgstr "Останні новини та оголошення."
+
+msgid "Loading AppStream metadata and DNF repositories…"
+msgstr "Завантаження метаданих AppStream і сховищ DNF…"
+
+msgid "Loading…"
+msgstr "Завантаження…"
+
+msgid "Local RPM Install"
+msgstr "Встановлення локальних RPM"
+
+msgid "Networking"
+msgstr "Мережа"
+
+msgid "News"
+msgstr "Новини"
+
+msgid "No queued package actions yet."
+msgstr "Черга дій із пакунками порожня."
+
+msgid "No transaction log available yet."
+msgstr "Журнал транзакцій недоступний."
+
+msgid "No updates are available."
+msgstr "Оновлення відсутні."
+
+msgid "No updates available"
+msgstr "Оновлення відсутні"
+
+msgid "Open"
+msgstr "Відкрити"
+
+msgid "Open App Center"
+msgstr "Відкрити Центр застосунків"
+
+msgid "Open directly to the Updates section"
+msgstr "Відкрити одразу розділ оновлень"
+
+msgid "Package update(s) are available."
+msgstr "Доступні оновлення пакунків."
+
+msgid "Pastebin URL"
+msgstr "URL Pastebin"
+
+msgid "Pastebin upload failed"
+msgstr "Не вдалося надіслати до Pastebin"
+
+msgid "Productivity"
+msgstr "Продуктивність"
+
+msgid "Queue"
+msgstr "Черга"
+
+msgid "Queued actions"
+msgstr "Дії в черзі"
+
+msgid "Remember auth"
+msgstr "Запам’ятати автентифікацію"
+
+msgid "Remove"
+msgstr "Видалити"
+
+msgid "Repositories"
+msgstr "Сховища"
+
+msgid "Science"
+msgstr "Наука"
+
+msgid "Screenshots"
+msgstr "Знімки екрана"
+
+msgid "Screenshots could not be loaded locally."
+msgstr "Не вдалося завантажити знімки екрана."
+
+msgid "Search applications…"
+msgstr "Пошук застосунків…"
+
+msgid "Search filter…"
+msgstr "Пошук за фільтром…"
+
+msgid "Send to pastebin"
+msgstr "Надіслати до Pastebin"
+
+msgid "Startup failed"
+msgstr "Помилка запуску"
+
+msgid "System"
+msgstr "Система"
+
+msgid "System Update"
+msgstr "Оновлення системи"
+
+msgid "System update is already in the queue."
+msgstr "Оновлення системи вже в черзі."
+
+msgid "These settings affect the tray updater service."
+msgstr "Ці налаштування стосуються служби оновлювача на панелі."
+
+msgid "Transaction log"
+msgstr "Журнал транзакцій"
+
+msgid "Update"
+msgstr "Оновлення"
+
+msgid "Update Selected"
+msgstr "Оновити вибране"
+
+msgid "Select All and Update"
+msgstr "Вибрати все й оновити"
+
+msgid "Update checker"
+msgstr "Перевірка оновлень"
+
+msgid "Updates"
+msgstr "Оновлення"
+
+msgid "Updates are available"
+msgstr "Доступні оновлення"
+
+msgid "Utilities"
+msgstr "Утиліти"
+
+msgid "View Queue"
+msgstr "Переглянути чергу"
+
+msgid "View transaction log"
+msgstr "Переглянути журнал транзакцій"
+
+msgid "days"
+msgstr "дн."
+
+msgid "gtk-launch not found on this system."
+msgstr "У системі не знайдено gtk-launch."
+
+msgid "hours"
+msgstr "год."
+
+msgid "weeks"
+msgstr "тиж."
+
+msgid "← Back"
+msgstr "← Назад"
+
+msgid "Enable notifications"
+msgstr "Увімкнути сповіщення"
+
+msgid "Check updates once and exit"
+msgstr "Перевірити оновлення один раз і вийти"
+
+msgid "Force metadata refresh when used with --check"
+msgstr "Примусово оновити метадані з параметром --check"
+
+msgid "Print result as JSON when used with --check"
+msgstr "Вивести результат у форматі JSON з параметром --check"
