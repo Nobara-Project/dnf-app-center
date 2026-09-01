@@ -1,5 +1,5 @@
 Name:           dnf-app-center
-Version:        0.1.6
+Version:        0.1.7
 Release:        1%{?dist}
 Summary:        GTK App Center for DNF/AppStream with updater tray service
 
@@ -110,6 +110,10 @@ desktop-file-validate %{buildroot}%{_sysconfdir}/xdg/autostart/org.dnf.AppCenter
 %lang(zh_TW) %{_datadir}/locale/zh_TW/LC_MESSAGES/org.dnf.AppCenter.mo
 
 %changelog
+* Mon Aug 31 2026 DNF App Center <packages@example.invalid> - 0.1.7-1
+- Do not pass dependency-only packages as explicit update targets
+- Keep package update preflight aligned with installed update targets
+
 * Sat Aug 22 2026 DNF App Center <packages@example.invalid> - 0.1.6-1
 - Add persistent Flatpak update option for Nobara system updates
 - Pass --all to nobara-sync when Flatpak updates are enabled

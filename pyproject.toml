@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dnf-app-center"
-version = "0.1.6"
+version = "0.1.7"
 description = "A basic Fedora app center using libdnf5 and AppStream"
 readme = "README.md"
 requires-python = ">=3.11"
