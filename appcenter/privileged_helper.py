@@ -89,6 +89,46 @@ def _looks_like_nobara_sync_failure(lines: list[str]) -> bool:
     return any(any(n in line for n in needles) for line in lines)
 
 
+def _safe_pkg_text(pkg, method_name: str) -> str:
+    method = getattr(pkg, method_name, None)
+    if method is None:
+        return ""
+    try:
+        value = method()
+    except Exception:
+        return ""
+    return str(value or "")
+
+
+def _installed_package_specs(libdnf5, base) -> frozenset[str]:
+    try:
+        installed_query = libdnf5.rpm.PackageQuery(base)
+        installed_query.filter_installed()
+    except Exception:
+        return frozenset()
+
+    specs: set[str] = set()
+    for package in installed_query:
+        name = _safe_pkg_text(package, "get_name")
+        if not name:
+            continue
+        specs.add(name)
+        arch = _safe_pkg_text(package, "get_arch")
+        if arch:
+            specs.add(f"{name}.{arch}")
+    return frozenset(specs)
+
+
+def _filter_update_targets(libdnf5, base, pkg_names: list[str]) -> tuple[list[str], list[str]]:
+    installed_specs = _installed_package_specs(libdnf5, base)
+    if not installed_specs:
+        return pkg_names, []
+
+    targets = [name for name in pkg_names if name in installed_specs]
+    skipped = [name for name in pkg_names if name not in installed_specs]
+    return targets, skipped
+
+
 def _preflight_transaction(action: str, pkg_names: list[str]) -> tuple[bool, str]:
     if action not in {"install", "update"}:
         return True, ""
@@ -253,22 +293,28 @@ def _run_transaction(libdnf5, base, action: str, pkg_name: str | list[str]) -> t
     pkg_names = [pkg_name] if isinstance(pkg_name, str) else [pkg for pkg in pkg_name if pkg]
     if not pkg_names:
         return False, "No packages were specified."
+    target_names = pkg_names
     if action == "install":
-        for name in pkg_names:
+        for name in target_names:
             goal.add_install(name)
-        description = f"Install {', '.join(pkg_names)}" if len(pkg_names) <= 3 else f"Install {len(pkg_names)} packages"
+        description = f"Install {', '.join(target_names)}" if len(target_names) <= 3 else f"Install {len(target_names)} packages"
     elif action == "remove":
-        for name in pkg_names:
+        for name in target_names:
             goal.add_remove(name)
-        description = f"Remove {', '.join(pkg_names)}" if len(pkg_names) <= 3 else f"Remove {len(pkg_names)} packages"
+        description = f"Remove {', '.join(target_names)}" if len(target_names) <= 3 else f"Remove {len(target_names)} packages"
     elif action == "update":
-        for name in pkg_names:
+        target_names, skipped = _filter_update_targets(libdnf5, base, pkg_names)
+        if skipped:
+            emit("log", message="Skipping non-installed update target(s): " + ", ".join(skipped))
+        if not target_names:
+            return False, "No installed packages were selected for update."
+        for name in target_names:
             goal.add_upgrade(name)
-        description = f"Update {', '.join(pkg_names)}" if len(pkg_names) <= 3 else f"Update {len(pkg_names)} packages"
+        description = f"Update {', '.join(target_names)}" if len(target_names) <= 3 else f"Update {len(target_names)} packages"
     else:
         return False, f"Unsupported action: {action}"
 
-    ok, message = _preflight_transaction(action, pkg_names)
+    ok, message = _preflight_transaction(action, target_names)
     if not ok:
         return False, message
 

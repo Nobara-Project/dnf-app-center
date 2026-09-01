@@ -361,14 +361,15 @@ class DnfBackend:
                     if not name:
                         continue
                     installed_pkg = self._get_installed_package(name)
+                    if installed_pkg is None:
+                        continue
                     installed_arch = self._get_pkg_arch(installed_pkg)
                     pkg_arch = self._get_pkg_arch(pkg)
                     if installed_arch and pkg_arch not in {installed_arch, "noarch"}:
                         continue
 
                     self._ingest_pkg_into_cache(cache, pkg, installed=False)
-                    if installed_pkg is not None:
-                        self._ingest_pkg_into_cache(cache, installed_pkg, installed=True)
+                    self._ingest_pkg_into_cache(cache, installed_pkg, installed=True)
 
             items = list(cache.values())
             # Filter out packages where:
@@ -690,6 +691,45 @@ class DnfBackend:
             return ""
         return str(value or "")
 
+    def _installed_package_specs(self) -> frozenset[str]:
+        try:
+            installed_query = self.libdnf5.rpm.PackageQuery(self.base)
+            installed_query.filter_installed()
+        except Exception:
+            return frozenset()
+
+        specs: set[str] = set()
+        for package in installed_query:
+            name = self._safe_pkg_text(package, "get_name")
+            if not name:
+                continue
+            specs.add(name)
+            arch = self._safe_pkg_text(package, "get_arch")
+            if arch:
+                specs.add(f"{name}.{arch}")
+        return frozenset(specs)
+
+    def _filter_update_targets(
+        self,
+        pkg_names: list[str],
+        event_cb: Callable[[dict], None] | None = None,
+    ) -> tuple[list[str], list[str]]:
+        installed_specs = self._installed_package_specs()
+        if not installed_specs:
+            return pkg_names, []
+
+        targets = [name for name in pkg_names if name in installed_specs]
+        skipped = [name for name in pkg_names if name not in installed_specs]
+        if skipped and event_cb is not None:
+            event_cb(
+                {
+                    "event": "log",
+                    "message": "Skipping non-installed update target(s): "
+                    + ", ".join(skipped),
+                }
+            )
+        return targets, skipped
+
     def set_repository_enabled(self, repo_id: str, enabled: bool, event_cb: Callable[[dict], None] | None = None) -> tuple[bool, str]:
         payload = {"cmd": "repo-toggle", "repo_id": str(repo_id), "enabled": bool(enabled)}
         ok, message = self._run_privileged_helper_payload(payload, event_cb=event_cb)
@@ -851,21 +891,29 @@ class DnfBackend:
         pkg_names = [pkg_name] if isinstance(pkg_name, str) else [pkg for pkg in pkg_name if pkg]
         if not pkg_names:
             return False, "No packages were specified."
+        target_names = pkg_names
         if action == "install":
-            for name in pkg_names:
+            for name in target_names:
                 goal.add_install(name)
-            description = f"Install {', '.join(pkg_names)}" if len(pkg_names) <= 3 else f"Install {len(pkg_names)} packages"
+            description = f"Install {', '.join(target_names)}" if len(target_names) <= 3 else f"Install {len(target_names)} packages"
         elif action == "remove":
-            for name in pkg_names:
+            for name in target_names:
                 goal.add_remove(name)
-            description = f"Remove {', '.join(pkg_names)}" if len(pkg_names) <= 3 else f"Remove {len(pkg_names)} packages"
+            description = f"Remove {', '.join(target_names)}" if len(target_names) <= 3 else f"Remove {len(target_names)} packages"
         elif action == "update":
-            for name in pkg_names:
+            target_names, _skipped = self._filter_update_targets(pkg_names, event_cb)
+            if not target_names:
+                return False, "No installed packages were selected for update."
+            for name in target_names:
                 goal.add_upgrade(name)
-            description = f"Update {', '.join(pkg_names)}" if len(pkg_names) <= 3 else f"Update {len(pkg_names)} packages"
-            return self._run_transaction(goal, description, event_cb=event_cb)
+            description = f"Update {', '.join(target_names)}" if len(target_names) <= 3 else f"Update {len(target_names)} packages"
         else:
             return False, f"Unsupported action: {action}"
+
+        ok, message = self._preflight_transaction(action, target_names, event_cb)
+        if not ok:
+            return False, message
+        return self._run_transaction(goal, description, event_cb=event_cb)
 
     def _start_privileged_helper(self, event_cb: Callable[[dict], None] | None = None) -> tuple[bool, str]:
         helper = Path(__file__).with_name("privileged_helper.py").resolve()
@@ -989,7 +1037,12 @@ class DnfBackend:
             return result_ok, result_message
 
     def _run_privileged_helper(self, action: str, pkg_name: str | list[str], event_cb: Callable[[dict], None] | None = None) -> tuple[bool, str]:
-        return self._run_privileged_helper_payload({"cmd": "action", "action": action, "pkg_names": ([pkg_name] if isinstance(pkg_name, str) else list(pkg_name))}, event_cb=event_cb)
+        pkg_names = [pkg_name] if isinstance(pkg_name, str) else [pkg for pkg in pkg_name if pkg]
+        if action == "update":
+            pkg_names, _skipped = self._filter_update_targets(pkg_names, event_cb)
+            if not pkg_names:
+                return False, "No installed packages were selected for update."
+        return self._run_privileged_helper_payload({"cmd": "action", "action": action, "pkg_names": pkg_names}, event_cb=event_cb)
 
     def install(self, pkg_name: str) -> tuple[bool, str]:
         return self.execute_action("install", pkg_name)
