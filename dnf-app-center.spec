@@ -1,5 +1,5 @@
 Name:           dnf-app-center
-Version:        0.1.7
+Version:        0.1.8
 Release:        1%{?dist}
 Summary:        GTK App Center for DNF/AppStream with updater tray service
 
@@ -110,6 +110,9 @@ desktop-file-validate %{buildroot}%{_sysconfdir}/xdg/autostart/org.dnf.AppCenter
 %lang(zh_TW) %{_datadir}/locale/zh_TW/LC_MESSAGES/org.dnf.AppCenter.mo
 
 %changelog
+* Sun Sep 27 2026 DNF App Center <packages@example.invalid> - 0.1.8-1
+- Bump version to 0.1.8
+
 * Mon Aug 31 2026 DNF App Center <packages@example.invalid> - 0.1.7-1
 - Do not pass dependency-only packages as explicit update targets
 - Keep package update preflight aligned with installed update targets

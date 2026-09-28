@@ -166,6 +166,7 @@ class QueueItem:
     pkg_names: list[str] = field(default_factory=list)
     file_paths: list[str] = field(default_factory=list)
     label: str | None = None
+    update_result: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.pkg_names:
@@ -1171,6 +1172,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._setup_rpm_drop_target()
 
         root.append(self._build_top_bar())
+        self.update_banner = Adw.Banner(title="")
+        self.update_banner.set_revealed(False)
+        root.append(self.update_banner)
 
         body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         body.set_vexpand(True)
@@ -2880,7 +2884,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _handle_queue_event(self, item: QueueItem, payload: dict) -> bool:
         message = str(payload.get("message") or "").strip()
-        if message:
+        if payload.get("event") == "update-status" and item.action == "system-update":
+            item.update_result = dict(payload)
+            item.message = message
+            self.update_banner.set_title(message)
+            self.update_banner.set_revealed(payload.get("reboot_required") is True)
+        elif message:
             item.message = message
             self._append_queue_log(f"{item.display_name}: {message}")
         self._refresh_queue_page()
@@ -2891,8 +2900,8 @@ class MainWindow(Adw.ApplicationWindow):
         item.message = message
         self._append_queue_log(f"{item.display_name}: {message}")
         if item.action == "system-update":
-            # Preparing an offline update does not change installed versions.
-            # Keep the backend's real package state until installation at boot.
+            # Refresh actual installed versions when the queue finishes:
+            # this result may describe either live installation or staging.
             self._show_toast(message if ok else f"{item.display_name} failed")
             self._invalidate_page_caches()
             self._refresh_queue_page()
@@ -3023,6 +3032,8 @@ class MainWindow(Adw.ApplicationWindow):
         return f"{done} completed, {failed} failed, {queued} queued."
 
     def _append_queue_log(self, line: str) -> None:
+        if self.queue_log_full and self.queue_log_full[-1] == line:
+            return
         self.queue_log_full.append(line)
         self.queue_logs.append(line)
         if len(self.queue_logs) > 400:

@@ -287,7 +287,7 @@ def _run_system_update(sync_args: list[str] | None = None) -> tuple[bool, str]:
     for raw in process.stdout:
         line = raw.rstrip("\n")
         output_lines.append(line)
-        if line:
+        if line and not line.startswith("NOBARA_UPDATE_RESULT "):
             emit("log", message=line)
     rc = process.wait()
     if rc == 0:
@@ -295,6 +295,7 @@ def _run_system_update(sync_args: list[str] | None = None) -> tuple[bool, str]:
         if result:
             emit("update-status", **result)
         return True, result.get("message", "System update completed successfully.")
+    output_lines = [line for line in output_lines if not line.startswith("NOBARA_UPDATE_RESULT ")]
     if _looks_like_dependency_conflict(output_lines):
         return False, "\n".join(output_lines) or "System update reported conflicts/broken dependencies."
     return False, "\n".join(output_lines) or f"nobara-sync cli failed with exit code {rc}."
