@@ -2890,6 +2890,15 @@ class MainWindow(Adw.ApplicationWindow):
         item.status = "done" if ok else "failed"
         item.message = message
         self._append_queue_log(f"{item.display_name}: {message}")
+        if item.action == "system-update":
+            # Preparing an offline update does not change installed versions.
+            # Keep the backend's real package state until installation at boot.
+            self._show_toast(message if ok else f"{item.display_name} failed")
+            self._invalidate_page_caches()
+            self._refresh_queue_page()
+            self._refresh_visible_list()
+            self._refresh_detail_action_button()
+            return False
         if self.backend:
             if ok:
                 # Update every in-memory representation of the acted-on package.

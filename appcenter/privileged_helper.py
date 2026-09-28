@@ -244,6 +244,18 @@ def _system_update_args(pkg_name: str | list[str]) -> list[str]:
     return ["--all"] if "--all" in {str(pkg) for pkg in pkg_names} else []
 
 
+def _nobara_update_result(lines: list[str]) -> dict:
+    for line in reversed(lines):
+        if line.startswith("NOBARA_UPDATE_RESULT "):
+            try:
+                result = json.loads(line.removeprefix("NOBARA_UPDATE_RESULT "))
+                if isinstance(result, dict) and isinstance(result.get("message"), str):
+                    return result
+            except ValueError:
+                pass
+    return {}
+
+
 def _run_system_update(sync_args: list[str] | None = None) -> tuple[bool, str]:
     sync_cmd = ["nobara-sync", "cli", *(sync_args or [])]
     emit("log", message=f"Running system update via {' '.join(sync_cmd)}...")
@@ -279,7 +291,10 @@ def _run_system_update(sync_args: list[str] | None = None) -> tuple[bool, str]:
             emit("log", message=line)
     rc = process.wait()
     if rc == 0:
-        return True, "System update completed successfully."
+        result = _nobara_update_result(output_lines)
+        if result:
+            emit("update-status", **result)
+        return True, result.get("message", "System update completed successfully.")
     if _looks_like_dependency_conflict(output_lines):
         return False, "\n".join(output_lines) or "System update reported conflicts/broken dependencies."
     return False, "\n".join(output_lines) or f"nobara-sync cli failed with exit code {rc}."

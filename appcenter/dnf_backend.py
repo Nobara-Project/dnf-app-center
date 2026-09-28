@@ -1086,7 +1086,19 @@ class DnfBackend:
                 event_cb({"event": "log", "message": line})
         rc = proc.wait()
         if rc == 0:
-            return True, "System update completed successfully."
+            result = {}
+            for line in reversed(lines):
+                if line.startswith("NOBARA_UPDATE_RESULT "):
+                    try:
+                        candidate = json.loads(line.removeprefix("NOBARA_UPDATE_RESULT "))
+                        if isinstance(candidate, dict) and isinstance(candidate.get("message"), str):
+                            result = candidate
+                            break
+                    except ValueError:
+                        pass
+            if result and event_cb is not None:
+                event_cb({"event": "update-status", **result})
+            return True, result.get("message", "System update completed successfully.")
         if self._looks_like_dependency_conflict(lines):
             return False, "\n".join(lines) or "System update reported conflicts/broken dependencies."
         return False, "\n".join(lines) or f"nobara-sync cli failed with exit code {rc}."
