@@ -2899,6 +2899,16 @@ class MainWindow(Adw.ApplicationWindow):
         item.status = "done" if ok else "failed"
         item.message = message
         self._append_queue_log(f"{item.display_name}: {message}")
+        if ok:
+            # The tray is a separate process with its own update cache.
+            # Refresh it immediately after package changes or system staging.
+            try:
+                connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+                connection.call("org.dnf.AppCenter.UpdateService", "/org/dnf/AppCenter/UpdateService",
+                                "org.dnf.AppCenter.UpdateService", "RefreshUpdates", GLib.Variant("(b)", (False,)),
+                                None, Gio.DBusCallFlags.NO_AUTO_START, 2000, None, None, None)
+            except GLib.Error:
+                pass
         if item.action == "system-update":
             # Refresh actual installed versions when the queue finishes:
             # this result may describe either live installation or staging.

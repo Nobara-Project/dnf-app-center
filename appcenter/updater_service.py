@@ -60,8 +60,90 @@ def _spawn_app(*extra: str) -> None:
 
 
 class Indicator:
+    """Own the tray registration only while there are available updates.
+
+    AppIndicator uses a shared D-Bus connection; setting PASSIVE or dropping
+    its Python object does not reliably remove it from panel icon lists.
+    A short-lived child gives the icon its own connection and lifetime.
+    """
+    def __init__(self):
+        self._process = None
+
+    def close(self):
+        process, self._process = self._process, None
+        if process is None:
+            return
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+    def set_updates(self, count: int) -> None:
+        if count <= 0:
+            self.close()
+            return
+        if self._process is not None and self._process.poll() is not None:
+            self.close()
+        if self._process is None:
+            self._process = subprocess.Popen(
+                [sys.executable, "-m", "appcenter.updater_service", "--indicator"],
+                stdin=subprocess.PIPE, text=True,
+                stdout=subprocess.DEVNULL,
+            )
+        try:
+            self._process.stdin.write(str(count) + "\n")
+            self._process.stdin.flush()
+        except OSError:
+            LOGGER.exception("Unable to update tray indicator")
+            self.close()
+
+
+def indicator_main() -> int:
+    # The stdin pipe closes on parent exit too, so a crashed update checker
+    # cannot leave a stale icon in the user's panel.
+    if dbus is not None:
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+
+    def refresh(force):
+        if dbus is not None:
+            try:
+                service = dbus.SessionBus().get_object(BUS_NAME, OBJECT_PATH)
+                service.RefreshUpdates(bool(force), dbus_interface=BUS_NAME,
+                                       reply_handler=lambda: None,
+                                       error_handler=lambda error: LOGGER.warning("Update refresh failed: %s", error))
+            except dbus.DBusException:
+                LOGGER.exception("Unable to contact update checker")
+
+    icon = TrayIcon(refresh)
+    loop = GLib.MainLoop()
+
+    def read_counts():
+        try:
+            for line in sys.stdin:
+                count = int(line)
+                if count <= 0:
+                    break
+                GLib.idle_add(icon.set_updates, count)
+        finally:
+            GLib.idle_add(loop.quit)
+
+    threading.Thread(target=read_counts, daemon=True).start()
+    loop.run()
+    return 0
+
+
+class TrayIcon:
     def __init__(self, refresh_func):
         self.refresh_func = refresh_func
+        self._indicator = None
+        self.last_updates = 0
+
+    def _create(self):
         self._indicator = AppIndicator3.Indicator.new(
             "dnf-app-center-updater",
             APP_ICON,
@@ -74,7 +156,6 @@ class Indicator:
         self._indicator.set_status(AppIndicator3.IndicatorStatus.PASSIVE)
         self._indicator.set_title(_("No updates available"))
         self._indicator.set_menu(self._build_menu())
-        self.last_updates = 0
 
     def _build_menu(self):
         menu = Gtk.Menu()
@@ -95,6 +176,8 @@ class Indicator:
     def set_updates(self, count: int) -> None:
         self.last_updates = count
         if count > 0:
+            if self._indicator is None:
+                self._create()
             self._indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
             title = f"{count} update(s) available"
             self._indicator.set_title(title)
@@ -102,13 +185,18 @@ class Indicator:
                 self._indicator.set_label(str(count), "updates")
             except Exception:
                 pass
-        else:
-            self._indicator.set_title(_("No updates available"))
-            try:
-                self._indicator.set_label("", "updates")
-            except Exception:
-                pass
-            self._indicator.set_status(AppIndicator3.IndicatorStatus.PASSIVE)
+
+def _rpmdb_signature():
+    files = ("/usr/lib/sysimage/rpm/rpmdb.sqlite", "/usr/lib/sysimage/rpm/rpmdb.sqlite-wal",
+             "/var/lib/rpm/rpmdb.sqlite", "/var/lib/rpm/rpmdb.sqlite-wal", "/var/lib/rpm/Packages")
+    signature = []
+    for filename in files:
+        try:
+            info = Path(filename).stat()
+            signature.append((filename, info.st_ino, info.st_mtime_ns, info.st_size))
+        except OSError:
+            continue
+    return tuple(signature)
 
 
 class Notification:
@@ -160,11 +248,13 @@ class UpdateService(dbus.service.Object if dbus is not None else object):
 
 class Updater:
     def __init__(self):
-        self.indicator = Indicator(self.refresh_updates)
+        self.indicator = Indicator()
         self.notification = Notification()
         self._lock = threading.Lock()
         self._refreshing = False
         self._last_check_monotonic = 0.0
+        self._last_rpmdb_signature = None
+        self._refresh_again = False
 
     def _check_updates(self, refresh: bool) -> int:
         backend = DnfBackend()
@@ -183,13 +273,16 @@ class Updater:
             return False
         with self._lock:
             if self._refreshing:
+                self._refresh_again = True
                 return False
             self._refreshing = True
 
         def worker() -> None:
             try:
                 LOGGER.info("Checking for updates (refresh=%s)", refresh)
+                signature = _rpmdb_signature()
                 count = self._check_updates(refresh)
+                self._last_rpmdb_signature = signature
                 self._last_check_monotonic = time.monotonic()
                 GLib.idle_add(self._apply_update_count, count)
             except Exception:
@@ -198,12 +291,17 @@ class Updater:
             finally:
                 with self._lock:
                     self._refreshing = False
+                    again, self._refresh_again = self._refresh_again, False
+                if again:
+                    GLib.idle_add(self.refresh_updates, False)
 
         threading.Thread(target=worker, daemon=True).start()
         return False
 
     def _apply_update_count(self, count: int) -> bool:
         settings = load_updater_settings()
+        if not settings.get("enabled", True):
+            count = 0
         self.indicator.set_updates(count)
         if _notifications_allowed(settings):
             self.notification.send(count)
@@ -218,7 +316,8 @@ class Updater:
             return True
         interval = updater_interval_seconds(settings)
         now = time.monotonic()
-        if self._last_check_monotonic <= 0 or now - self._last_check_monotonic >= interval:
+        if (self._last_check_monotonic <= 0 or now - self._last_check_monotonic >= interval
+                or self._last_rpmdb_signature != _rpmdb_signature()):
             self.refresh_updates(False)
         return True
 
@@ -255,7 +354,10 @@ def cli_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="Check for updates once and exit")
     parser.add_argument("--refresh", action="store_true", help="Force metadata refresh when used with --check")
     parser.add_argument("--json", action="store_true", help="Print result as JSON when used with --check")
+    parser.add_argument("--indicator", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.indicator:
+        return indicator_main()
     if args.check:
         return manual_update_check(args.refresh, json_out=args.json)
     return main()
@@ -277,7 +379,10 @@ def main() -> int:
     updater.refresh_updates(False)
     GLib.timeout_add_seconds(TICK_INTERVAL, updater.schedule)
     loop = GLib.MainLoop()
-    loop.run()
+    try:
+        loop.run()
+    finally:
+        updater.indicator.close()
     return 0
 
 
