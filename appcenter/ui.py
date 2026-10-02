@@ -22,6 +22,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk, Pango
 
 from .appstream_catalog import AppStreamCatalog, AppStreamUnavailable
 from .dnf_backend import DnfBackend, DnfUnavailable
+from . import update_output
 
 import json
 from pathlib import Path as _Path
@@ -2883,7 +2884,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _handle_queue_event(self, item: QueueItem, payload: dict) -> bool:
-        message = str(payload.get("message") or "").strip()
+        message = update_output.visible_text(str(payload.get("message") or ""))
         if payload.get("event") == "update-status" and item.action == "system-update":
             item.update_result = dict(payload)
             item.message = message
@@ -2896,6 +2897,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _queue_item_finished(self, item: QueueItem, ok: bool, message: str) -> bool:
+        message = update_output.visible_text(message) or ("Operation completed." if ok else "Operation failed.")
         item.status = "done" if ok else "failed"
         item.message = message
         self._append_queue_log(f"{item.display_name}: {message}")
@@ -3042,6 +3044,9 @@ class MainWindow(Adw.ApplicationWindow):
         return f"{done} completed, {failed} failed, {queued} queued."
 
     def _append_queue_log(self, line: str) -> None:
+        line = update_output.visible_text(line)
+        if not line:
+            return
         if self.queue_log_full and self.queue_log_full[-1] == line:
             return
         self.queue_log_full.append(line)

@@ -14,6 +14,7 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 
 from .models import AppEntry
+from . import update_output
 
 
 class DnfUnavailable(RuntimeError):
@@ -1082,24 +1083,15 @@ class DnfBackend:
         for raw in proc.stdout:
             line = raw.rstrip("\n")
             lines.append(line)
-            if event_cb is not None and line and not line.startswith("NOBARA_UPDATE_RESULT "):
+            if event_cb is not None and line and not update_output.result_line(line)[0]:
                 event_cb({"event": "log", "message": line})
         rc = proc.wait()
         if rc == 0:
-            result = {}
-            for line in reversed(lines):
-                if line.startswith("NOBARA_UPDATE_RESULT "):
-                    try:
-                        candidate = json.loads(line.removeprefix("NOBARA_UPDATE_RESULT "))
-                        if isinstance(candidate, dict) and isinstance(candidate.get("message"), str):
-                            result = candidate
-                            break
-                    except ValueError:
-                        pass
+            result = update_output.last_result(lines)
             if result and event_cb is not None:
                 event_cb({"event": "update-status", **result})
             return True, result.get("message", "System update completed successfully.")
-        lines = [line for line in lines if not line.startswith("NOBARA_UPDATE_RESULT ")]
+        lines = [line for line in lines if not update_output.result_line(line)[0]]
         if self._looks_like_dependency_conflict(lines):
             return False, "\n".join(lines) or "System update reported conflicts/broken dependencies."
         return False, "\n".join(lines) or f"nobara-sync cli failed with exit code {rc}."

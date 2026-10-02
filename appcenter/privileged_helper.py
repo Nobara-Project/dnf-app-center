@@ -8,6 +8,11 @@ import pwd
 import subprocess
 import sys
 
+if __package__:
+    from . import update_output
+else:
+    import update_output
+
 def _force_user_env():
     """Extracts --user-home from sys.argv before formal parsing to fix HOME immediately."""
     for i, arg in enumerate(sys.argv):
@@ -245,15 +250,7 @@ def _system_update_args(pkg_name: str | list[str]) -> list[str]:
 
 
 def _nobara_update_result(lines: list[str]) -> dict:
-    for line in reversed(lines):
-        if line.startswith("NOBARA_UPDATE_RESULT "):
-            try:
-                result = json.loads(line.removeprefix("NOBARA_UPDATE_RESULT "))
-                if isinstance(result, dict) and isinstance(result.get("message"), str):
-                    return result
-            except ValueError:
-                pass
-    return {}
+    return update_output.last_result(lines)
 
 
 def _run_system_update(sync_args: list[str] | None = None) -> tuple[bool, str]:
@@ -287,7 +284,7 @@ def _run_system_update(sync_args: list[str] | None = None) -> tuple[bool, str]:
     for raw in process.stdout:
         line = raw.rstrip("\n")
         output_lines.append(line)
-        if line and not line.startswith("NOBARA_UPDATE_RESULT "):
+        if line and not update_output.result_line(line)[0]:
             emit("log", message=line)
     rc = process.wait()
     if rc == 0:
@@ -295,7 +292,7 @@ def _run_system_update(sync_args: list[str] | None = None) -> tuple[bool, str]:
         if result:
             emit("update-status", **result)
         return True, result.get("message", "System update completed successfully.")
-    output_lines = [line for line in output_lines if not line.startswith("NOBARA_UPDATE_RESULT ")]
+    output_lines = [line for line in output_lines if not update_output.result_line(line)[0]]
     if _looks_like_dependency_conflict(output_lines):
         return False, "\n".join(output_lines) or "System update reported conflicts/broken dependencies."
     return False, "\n".join(output_lines) or f"nobara-sync cli failed with exit code {rc}."
