@@ -1849,6 +1849,8 @@ class MainWindow(Adw.ApplicationWindow):
         if force:
             self._invalidate_page_caches()
         self._is_loading = True
+        self.search_entry.set_sensitive(False)
+        self.search_entry.set_placeholder_text(_("Loading…"))
         self._show_loading_page(_("Loading AppStream metadata and DNF repositories…"))
 
         def worker() -> None:
@@ -1870,6 +1872,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _load_succeeded(self, catalog: AppStreamCatalog, backend: DnfBackend, apps: list[AppEntry], repos: list[dict[str, str]], news_text: str) -> bool:
         self._is_loading = False
+        self.search_entry.set_sensitive(True)
+        self.search_entry.set_placeholder_text(_("Search applications…"))
         self.catalog = catalog
         self.backend = backend
         self.apps = apps
@@ -1926,6 +1930,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _load_failed(self, exc: Exception, tb: str) -> bool:
         self._is_loading = False
+        self.search_entry.set_sensitive(True)
+        self.search_entry.set_placeholder_text(_("Search applications…"))
         self.status_label.set_text(_("Failed to load metadata."))
         self._show_toast(str(exc))
         self.title_label.set_text(_("Startup failed"))
