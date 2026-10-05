@@ -470,6 +470,12 @@ windowhandle > box.top-bar {
 .app-list-row {
   margin: 4px 0;
 }
+.app-grid > flowboxchild,
+.app-grid > flowboxchild:hover,
+.app-grid > flowboxchild:active {
+  padding: 0;
+  background: transparent;
+}
 .app-card {
   padding: 10px 14px;
   border-radius: 14px;
@@ -1064,6 +1070,9 @@ class AppCardTile(Gtk.Box):
         self.title_label.set_wrap(False)
         self.title_label.set_single_line_mode(True)
         self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        # The tile's 300px size request, not the text, sets its natural width,
+        # so the grid reflows 3 -> 2 -> 1 columns at fixed tile sizes.
+        self.title_label.set_max_width_chars(0)
         self.title_label.set_text(app.name)
         text_col.append(self.title_label)
 
@@ -1072,7 +1081,7 @@ class AppCardTile(Gtk.Box):
         self.summary_label.set_wrap(True)
         self.summary_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self.summary_label.set_lines(2)
-        self.summary_label.set_max_width_chars(22)
+        self.summary_label.set_max_width_chars(0)
         self.summary_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.summary_label.set_text(app.summary)
         text_col.append(self.summary_label)
@@ -2467,8 +2476,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         update_mode = self.current_group == "system" and self.current_page == "updates" and not self.current_search_text
         compact_grid = (self.view_mode == "grid")
-        cols = 3
-        # Chunk size must be a multiple of cols so grid rows are never split across batches
         chunk_size = 30
 
         def make_row(app: AppEntry) -> AppCardRow:
@@ -2482,29 +2489,34 @@ class MainWindow(Adw.ApplicationWindow):
                 update_toggle_cb=self._toggle_update_selection if update_mode else None,
             )
 
-        def make_tile_row(chunk: list[AppEntry]) -> Gtk.ListBoxRow:
-            row = Gtk.ListBoxRow()
-            row.set_activatable(False)
-            row.set_selectable(False)
-            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            row_box.set_homogeneous(True)
-            for app in chunk:
-                tile = AppCardTile(
-                    app,
-                    (lambda entry, mode=("update" if update_mode else None): self._run_action_for_app(entry, mode)),
-                    self._open_details,
-                    self._queued_state_label,
-                    page_mode=("updates" if update_mode else "default"),
-                    update_selected=(app.primary_pkg in self.update_selection if app.primary_pkg else False),
-                    update_toggle_cb=self._toggle_update_selection if update_mode else None,
-                )
-                row_box.append(tile)
-            for _ in range(cols - len(chunk)):
-                spacer = Gtk.Box()
-                spacer.set_hexpand(True)
-                row_box.append(spacer)
-            row.set_child(row_box)
-            return row
+        def make_tile(app: AppEntry) -> AppCardTile:
+            return AppCardTile(
+                app,
+                (lambda entry, mode=("update" if update_mode else None): self._run_action_for_app(entry, mode)),
+                self._open_details,
+                self._queued_state_label,
+                page_mode=("updates" if update_mode else "default"),
+                update_selected=(app.primary_pkg in self.update_selection if app.primary_pkg else False),
+                update_toggle_cb=self._toggle_update_selection if update_mode else None,
+            )
+
+        grid_flow = None
+        if compact_grid:
+            # Up to 3 columns, reflowing to 2 and then 1 as the window narrows.
+            grid_flow = Gtk.FlowBox()
+            grid_flow.add_css_class("app-grid")
+            grid_flow.set_selection_mode(Gtk.SelectionMode.NONE)
+            grid_flow.set_homogeneous(True)
+            grid_flow.set_min_children_per_line(1)
+            grid_flow.set_max_children_per_line(3)
+            grid_flow.set_column_spacing(8)
+            grid_flow.set_row_spacing(4)
+            grid_flow.set_valign(Gtk.Align.START)
+            grid_row = Gtk.ListBoxRow()
+            grid_row.set_activatable(False)
+            grid_row.set_selectable(False)
+            grid_row.set_child(grid_flow)
+            self.listbox.append(grid_row)
 
         def add_chunk(start: int) -> bool:
             if self._listbox_gen != gen:
@@ -2514,8 +2526,8 @@ class MainWindow(Adw.ApplicationWindow):
                 for i in range(start, end):
                     self.listbox.append(make_row(items[i]))
             else:
-                for i in range(start, end, cols):
-                    self.listbox.append(make_tile_row(items[i:i + cols]))
+                for i in range(start, end):
+                    grid_flow.append(make_tile(items[i]))
             if end < len(items):
                 GLib.idle_add(add_chunk, end, priority=GLib.PRIORITY_LOW)
             return GLib.SOURCE_REMOVE
