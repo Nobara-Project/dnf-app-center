@@ -246,7 +246,7 @@ def _run_rpm_file_install(paths: list[str]) -> tuple[bool, str]:
 
 def _system_update_args(pkg_name: str | list[str]) -> list[str]:
     pkg_names = [pkg_name] if isinstance(pkg_name, str) else list(pkg_name)
-    return ["--all"] if "--all" in {str(pkg) for pkg in pkg_names} else []
+    return update_output.sync_arguments(pkg_names)
 
 
 def _nobara_update_result(lines: list[str]) -> dict:
@@ -284,7 +284,10 @@ def _run_system_update(sync_args: list[str] | None = None) -> tuple[bool, str]:
     for raw in process.stdout:
         line = raw.rstrip("\n")
         output_lines.append(line)
-        if line and not update_output.result_line(line)[0]:
+        internal, progress = update_output.progress_line(line)
+        if progress:
+            emit("update-progress", progress=progress)
+        if line and not internal and not update_output.result_line(line)[0]:
             emit("log", message=line)
     rc = process.wait()
     if rc == 0:
@@ -292,7 +295,7 @@ def _run_system_update(sync_args: list[str] | None = None) -> tuple[bool, str]:
         if result:
             emit("update-status", **result)
         return True, result.get("message", "System update completed successfully.")
-    output_lines = [line for line in output_lines if not update_output.result_line(line)[0]]
+    output_lines = [line for line in output_lines if not update_output.internal_line(line)]
     if _looks_like_dependency_conflict(output_lines):
         return False, "\n".join(output_lines) or "System update reported conflicts/broken dependencies."
     return False, "\n".join(output_lines) or f"nobara-sync cli failed with exit code {rc}."

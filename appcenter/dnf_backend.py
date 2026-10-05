@@ -1057,7 +1057,7 @@ class DnfBackend:
 
     def _system_update_args(self, pkg_name: str | list[str]) -> list[str]:
         pkg_names = [pkg_name] if isinstance(pkg_name, str) else list(pkg_name)
-        return ["--all"] if "--all" in {str(pkg) for pkg in pkg_names} else []
+        return update_output.sync_arguments(pkg_names)
 
     def _run_nobara_sync_cli(self, sync_args: list[str] | None = None, event_cb: Callable[[dict], None] | None = None) -> tuple[bool, str]:
         cmd = ["nobara-sync", "cli", *(sync_args or [])]
@@ -1083,7 +1083,10 @@ class DnfBackend:
         for raw in proc.stdout:
             line = raw.rstrip("\n")
             lines.append(line)
-            if event_cb is not None and line and not update_output.result_line(line)[0]:
+            internal, progress = update_output.progress_line(line)
+            if event_cb is not None and progress:
+                event_cb({"event": "update-progress", "progress": progress})
+            if event_cb is not None and line and not internal and not update_output.result_line(line)[0]:
                 event_cb({"event": "log", "message": line})
         rc = proc.wait()
         if rc == 0:
@@ -1091,7 +1094,7 @@ class DnfBackend:
             if result and event_cb is not None:
                 event_cb({"event": "update-status", **result})
             return True, result.get("message", "System update completed successfully.")
-        lines = [line for line in lines if not update_output.result_line(line)[0]]
+        lines = [line for line in lines if not update_output.internal_line(line)]
         if self._looks_like_dependency_conflict(lines):
             return False, "\n".join(lines) or "System update reported conflicts/broken dependencies."
         return False, "\n".join(lines) or f"nobara-sync cli failed with exit code {rc}."

@@ -23,6 +23,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk, Pango
 from .appstream_catalog import AppStreamCatalog, AppStreamUnavailable
 from .dnf_backend import DnfBackend, DnfUnavailable
 from . import update_output
+from .update_queue import UpdateProgress
 
 import json
 from pathlib import Path as _Path
@@ -168,8 +169,12 @@ class QueueItem:
     file_paths: list[str] = field(default_factory=list)
     label: str | None = None
     update_result: dict = field(default_factory=dict)
+    sync_args: list[str] = field(default_factory=list)
+    package_progress: UpdateProgress | None = None
 
     def __post_init__(self) -> None:
+        if self.action == "system-update":
+            self.package_progress = UpdateProgress(self.pkg_names)
         if not self.pkg_names:
             self.pkg_names = [self.app.primary_pkg] if self.app.primary_pkg else []
 
@@ -1272,22 +1277,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.update_selected_button.connect("clicked", lambda *_: self._queue_selected_updates())
         self.updates_action_bar.append(self.update_selected_button)
 
-        self.update_all_button = Gtk.Button()
-        update_all_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        update_all_icon = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
-        update_all_label = Gtk.Label(label=_("Select All and Update"))
-        update_all_box.append(update_all_icon)
-        update_all_box.append(update_all_label)
-        self.update_all_button.set_child(update_all_box)
-        self.update_all_button.connect("clicked", lambda *_: self._queue_system_update())
-        self.updates_action_bar.append(self.update_all_button)
+        self.update_all_button = Gtk.Button(label=_("Select All"))
+        self.update_all_button.connect("clicked", lambda *_: self._select_all_updates())
+        self.updates_action_bar.prepend(self.update_all_button)
 
         self.update_flatpaks_check = Gtk.CheckButton(label=_("Also update flatpaks"))
         self.update_flatpaks_check.set_valign(Gtk.Align.CENTER)
-        self.update_flatpaks_check.set_tooltip_text(_("Append --all to nobara-sync for this system update."))
+        self.update_flatpaks_check.set_tooltip_text(_("Update Flatpaks along with the selected system packages."))
         self.update_flatpaks_check.set_active(bool(self.updater_settings.get("update_flatpaks", False)))
         self.update_flatpaks_check.connect("toggled", self._on_update_flatpaks_toggled)
-        self.updates_action_bar.append(self.update_flatpaks_check)
+        self.updates_options = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.updates_options.append(self.update_flatpaks_check)
+        selection_note = Gtk.Label(label=_("Required dependencies and Nobara fixups are included automatically. Release upgrades update the full system."), xalign=0)
+        selection_note.set_wrap(True)
+        selection_note.add_css_class("dim-label")
+        self.updates_options.append(selection_note)
+        self.content_header_box.append(self.updates_options)
 
         # News panel toggle button
         self.news_toggle_button = Gtk.ToggleButton()
@@ -2229,6 +2234,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _refresh_main_page(self, preserve_scroll: bool = True) -> None:
+        self._refresh_updates_action_bar(self.current_items)
         if preserve_scroll:
             visible_before, scroll_before = self._get_scroll_position_for_visible_page()
         else:
@@ -2735,6 +2741,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.update_selection.discard(pkg)
         self._refresh_updates_action_bar(self.current_items)
 
+    def _select_all_updates(self) -> None:
+        self.update_selection.update(app.primary_pkg for app in self.current_items if app.primary_pkg)
+        self._refresh_updates_action_bar(self.current_items)
+        self._refresh_main_page()
+
     def _clear_update_selection(self) -> None:
         self.update_selection.clear()
         self._refresh_updates_action_bar(self.current_items)
@@ -2743,6 +2754,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _refresh_updates_action_bar(self, items: list[AppEntry]) -> None:
         is_updates_page = self.current_group == "system" and self.current_page == "updates" and not self.current_search_text
         self.updates_action_bar.set_visible(is_updates_page)
+        self.updates_options.set_visible(is_updates_page)
         if not is_updates_page:
             return
         selectable = [app for app in items if app.primary_pkg]
@@ -2769,49 +2781,37 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         return False
 
-    def _queue_system_update(self) -> None:
-        update_flatpaks_check = getattr(self, "update_flatpaks_check", None)
-        include_flatpaks = bool(update_flatpaks_check and update_flatpaks_check.get_active())
-
-        # First, select all update items for visual feedback
-        items = [app for app in self.current_items if app.primary_pkg]
-        for app in items:
-            if app.primary_pkg:
-                self.update_selection.add(app.primary_pkg)
-        self._refresh_updates_action_bar(self.current_items)
+    def _queue_system_update(self, apps: list[AppEntry]) -> None:
+        if any(item.action == "system-update" and item.status in {"queued", "running"} for item in self.queue_items):
+            self._show_toast(_("System update is already in the queue."))
+            return
+        names = [app.primary_pkg for app in apps if app.primary_pkg]
+        if not names:
+            return
+        include_flatpaks = self.update_flatpaks_check.get_active()
+        # Selecting every available update keeps the normal CLI's full
+        # distro-sync (including downgrades, obsoletes and all migrations).
+        all_updates = {app.primary_pkg for app in self.backend.get_upgradable_packages() if app.primary_pkg}
+        full_update = bool(all_updates) and all_updates <= set(names)
+        args = ["--progress"]
+        if not full_update:
+            args.extend("--package=" + name for name in names)
+        if include_flatpaks:
+            args.append("--all")
+        item = QueueItem(apps[0], action="system-update", pkg_names=names, sync_args=args,
+                         message="Queued for Nobara update preparation", label=_("System Update"))
+        self.queue_items = [entry for entry in self.queue_items if entry.status != "done"]
+        self.queue_items.append(item)
+        self.update_selection.difference_update(names)
+        self._append_queue_log(f"Queued {len(names)} selected packages via nobara-sync; required dependencies and fixups may add packages.")
+        self._invalidate_page_caches()
+        self.status_label.set_text(self._queue_status_text())
+        self._refresh_queue_page()
         self._refresh_main_page()
-
-        if self._should_use_nobara_sync():
-            if any(item.action == "system-update" and item.status in {"queued", "running"} for item in self.queue_items):
-                self._show_toast(_("System update is already in the queue."))
-                return
-            base_app = self.current_items[0] if self.current_items else AppEntry(
-                appstream_id="system-update",
-                name="System Update",
-                summary="",
-                description="",
-                pkg_names=[],
-            )
-            sync_args = ["--all"] if include_flatpaks else []
-            label = _("System Update + Flatpaks") if include_flatpaks else _("System Update")
-            message = "Queued system update with Flatpaks" if include_flatpaks else "Queued system update"
-            item = QueueItem(base_app, action="system-update", message=message, pkg_names=sync_args, label=label)
-            self.queue_items.append(item)
-            command_label = "nobara-sync cli --all" if include_flatpaks else "nobara-sync cli"
-            self._append_queue_log(f"Queued system update via {command_label}")
-            self.status_label.set_text(self._queue_status_text())
-            self._refresh_queue_page()
-            self._refresh_main_page()
-            self._refresh_detail_action_button()
-            self._switch_page("system", "queue")
-            if not self.queue_worker_running:
-                self._start_queue_worker()
-            return
-
-        if not items:
-            self._show_toast(_("No updates are available."))
-            return
-        self._enqueue_update_batch(items)
+        self._refresh_detail_action_button()
+        self._switch_page("system", "queue")
+        if not self.queue_worker_running:
+            self._start_queue_worker()
 
     def _enqueue_update_batch(self, apps: list[AppEntry]) -> None:
         unique: list[AppEntry] = []
@@ -2825,6 +2825,9 @@ class MainWindow(Adw.ApplicationWindow):
             seen.add(pkg)
             unique.append(app)
         if not unique:
+            return
+        if self._should_use_nobara_sync():
+            self._queue_system_update(unique)
             return
         pkg_names = [app.primary_pkg for app in unique if app.primary_pkg]
         label = unique[0].name if len(unique) == 1 else f"{len(unique)} updates"
@@ -2851,20 +2854,25 @@ class MainWindow(Adw.ApplicationWindow):
                 item = next((entry for entry in self.queue_items if entry.status == "queued"), None)
                 if item is None:
                     break
+                # Claim before posting to GTK: its idle callback may run later.
+                item.status = "running"
                 GLib.idle_add(self._queue_item_started, item)
 
                 def on_event(payload: dict) -> None:
                     GLib.idle_add(self._handle_queue_event, item, payload)
 
                 if item.action == "system-update":
-                    target = item.pkg_names
+                    target = item.sync_args
                 elif item.action == 'install-rpms':
                     target = item.file_paths
                 else:
                     target = item.pkg_names if item.action == "update" and len(item.pkg_names) > 1 else (item.pkg_names or [item.pkg_name])
                     if isinstance(target, list) and len(target) == 1:
                         target = target[0]
-                ok, message = self.backend.execute_action(item.action, target, on_event)
+                try:
+                    ok, message = self.backend.execute_action(item.action, target, on_event)
+                except Exception as error:
+                    ok, message = False, str(error)
                 GLib.idle_add(self._queue_item_finished, item, ok, message)
             GLib.idle_add(self._queue_worker_done)
 
@@ -2884,6 +2892,10 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _handle_queue_event(self, item: QueueItem, payload: dict) -> bool:
+        if payload.get("event") == "update-progress" and item.action == "system-update":
+            item.package_progress.handle(payload.get("progress", {}))
+            self._schedule_queue_refresh()
+            return False
         message = update_output.visible_text(str(payload.get("message") or ""))
         if payload.get("event") == "update-status" and item.action == "system-update":
             item.update_result = dict(payload)
@@ -2893,12 +2905,14 @@ class MainWindow(Adw.ApplicationWindow):
         elif message:
             item.message = message
             self._append_queue_log(f"{item.display_name}: {message}")
-        self._refresh_queue_page()
+        self._schedule_queue_refresh()
         return False
 
     def _queue_item_finished(self, item: QueueItem, ok: bool, message: str) -> bool:
         message = update_output.visible_text(message) or ("Operation completed." if ok else "Operation failed.")
         item.status = "done" if ok else "failed"
+        if getattr(item, "package_progress", None):
+            item.package_progress.finish(ok, item.update_result)
         item.message = message
         self._append_queue_log(f"{item.display_name}: {message}")
         if ok:
@@ -3004,13 +3018,13 @@ class MainWindow(Adw.ApplicationWindow):
         done_count = sum(1 for item in self.queue_items if item.status == "done")
 
         if had_items and done_count:
-            self.queue_items = failed_items
+            self.queue_items = [item for item in self.queue_items if item.status != "done" or item.action == "system-update"]
             if failed_items:
                 self._append_queue_log(
-                    f"Queue finished. Cleared {done_count} completed item(s); {len(failed_items)} failed item(s) remain."
+                    f"Queue finished. {done_count} completed operation(s); {len(failed_items)} failed item(s) remain."
                 )
             else:
-                self._append_queue_log(f"Queue finished. Cleared {done_count} completed item(s).")
+                self._append_queue_log(f"Queue finished. {done_count} completed operation(s).")
 
         self.status_label.set_text(self._queue_status_text())
         self._refresh_queue_page()
@@ -3034,6 +3048,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _queue_status_text(self) -> str:
         if not self.queue_items:
             return "Queue is empty."
+        current = next((item for item in self.queue_items if item.status == "running"), self.queue_items[-1])
+        if current.package_progress:
+            return current.package_progress.summary()[1]
         done = sum(1 for item in self.queue_items if item.status == "done")
         failed = sum(1 for item in self.queue_items if item.status == "failed")
         running = next((item for item in self.queue_items if item.status == "running"), None)
@@ -3088,57 +3105,68 @@ class MainWindow(Adw.ApplicationWindow):
             self._refresh_detail_action_button()
         GLib.idle_add(self._restore_scroll_position, visible, scroll_before)
 
+    def _schedule_queue_refresh(self) -> None:
+        if getattr(self, "_queue_refresh_pending", False):
+            return
+        self._queue_refresh_pending = True
+        def refresh():
+            self._queue_refresh_pending = False
+            self._refresh_queue_page()
+            return False
+        GLib.timeout_add(100, refresh)
+
     def _refresh_queue_page(self) -> None:
         if not hasattr(self, "queue_list_box"):
             return
-        child = self.queue_list_box.get_first_child()
-        while child is not None:
-            next_child = child.get_next_sibling()
-            self.queue_list_box.remove(child)
-            child = next_child
-
-        total = len(self.queue_items)
-        done_count = sum(1 for item in self.queue_items if item.status == "done")
-        failed_count = sum(1 for item in self.queue_items if item.status == "failed")
-        resolved_count = done_count + failed_count
-        fraction = (resolved_count / total) if total else 0.0
-        if total:
-            if failed_count and done_count == 0:
-                progress_text = f"0/{total} complete, {failed_count} failed"
-            elif failed_count:
-                progress_text = f"{done_count}/{total} complete, {failed_count} failed"
-            else:
-                progress_text = f"{done_count}/{total} complete"
-        else:
-            progress_text = "Queue empty"
-        self.queue_progress.set_fraction(fraction)
-        self.queue_progress.set_show_text(True)
-        self.queue_progress.set_text(progress_text)
-
-        if self.queue_worker_running and total > resolved_count:
-            self.queue_progress.pulse()
-
-        if hasattr(self, "bottom_queue_revealer"):
-            self.bottom_queue_revealer.set_reveal_child(total > 0)
-            self.bottom_queue_progress.set_fraction(fraction)
-            self.bottom_queue_progress.set_show_text(True)
-            self.bottom_queue_progress.set_text(progress_text)
-            if self.queue_worker_running and total > resolved_count:
-                self.bottom_queue_progress.pulse()
-            self.bottom_queue_status.set_text(self._queue_status_text())
-
-        if not self.queue_items:
-            empty = Gtk.Label(label=_("No queued package actions yet."), xalign=0)
-            empty.add_css_class("dim-label")
-            self.queue_list_box.append(empty)
-
+        display = []
         for item in self.queue_items:
-            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            card.add_css_class("queue-item-card")
-            title = Gtk.Label(xalign=0)
-            title.set_markup(f"<b>{GLib.markup_escape_text(item.display_name)}</b> — {GLib.markup_escape_text(item.action)}")
-            card.append(title)
-            self.queue_list_box.append(card)
+            if item.package_progress:
+                for key, row in item.package_progress.rows.items():
+                    display.append(((id(item), key), row["nevra"] + " — " + row["action"],
+                                    item.package_progress.label(row), row["fraction"]))
+            else:
+                display.append(((id(item), ""), item.display_name + " — " + item.action,
+                                item.message, 1.0 if item.status == "done" else 0.0))
+        total = len(display)
+        fraction = sum(row[3] for row in display) / total if total else 0.0
+        current = next((item for item in self.queue_items if item.status == "running"), None)
+        if current is None and self.queue_items:
+            current = self.queue_items[-1]
+        if current and current.package_progress:
+            _, text = current.package_progress.summary()
+        else:
+            text = f"{sum(row[3] == 1 for row in display)}/{total} complete" if total else "Queue empty"
+        for bar in (self.queue_progress, self.bottom_queue_progress):
+            bar.set_fraction(fraction)
+            bar.set_show_text(True)
+            bar.set_text(text)
+        self.bottom_queue_revealer.set_reveal_child(total > 0)
+        self.bottom_queue_status.set_text(text)
+        # Update widgets in place: downloads can report many times per second.
+        # Rebuilding thousands of package cards per event stalls the GTK loop.
+        widgets = getattr(self, "_queue_widgets", {})
+        wanted = {row[0] for row in display}
+        for key in list(widgets):
+            if key not in wanted:
+                self.queue_list_box.remove(widgets.pop(key)[0])
+        for key, name, message, value in display:
+            if key not in widgets:
+                card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+                card.add_css_class("queue-item-card")
+                title = Gtk.Label(label=name, xalign=0)
+                title.set_ellipsize(Pango.EllipsizeMode.END)
+                title.set_tooltip_text(name)
+                title.add_css_class("heading")
+                bar = Gtk.ProgressBar()
+                bar.set_show_text(True)
+                card.append(title)
+                card.append(bar)
+                self.queue_list_box.append(card)
+                widgets[key] = (card, bar)
+            bar = widgets[key][1]
+            bar.set_fraction(value)
+            bar.set_text(message)
+        self._queue_widgets = widgets
 
     def _get_queue_log_text(self) -> str:
         if getattr(self, "queue_log_full", None):
