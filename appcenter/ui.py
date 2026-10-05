@@ -1338,6 +1338,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.subcategory_strip.append(self.subcat_right_button)
 
         self.stack = Gtk.Stack()
+        # Only the visible page may set the minimum width; otherwise the hidden
+        # grid page keeps the window wide on Queue/Repositories/Details.
+        self.stack.set_hhomogeneous(False)
         self.stack.set_hexpand(True)
         self.stack.set_vexpand(True)
         self.content_box.append(self.stack)
@@ -2243,6 +2246,12 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             visible_before, scroll_before = None, 0.0
         in_search_mode = bool(self.current_search_text)
+        if not in_search_mode and self.current_group == "system" and self.current_page in {"repositories", "queue"}:
+            # Grid/list toggle, local filter and news toggle only apply to app lists.
+            self.category_filter_entry.set_visible(False)
+            self.view_toggle_box.set_visible(False)
+            self.news_toggle_button.set_visible(False)
+            self.updates_action_bar.set_visible(False)
         if not in_search_mode and self.current_group == "system" and self.current_page == "repositories":
             self.title_label.set_text(CATEGORY_GROUPS["system"]["repositories"])
             self.status_label.set_text(f"Showing {len(getattr(self, 'repos', []))} repositories.")
