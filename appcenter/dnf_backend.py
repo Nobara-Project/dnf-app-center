@@ -1111,9 +1111,16 @@ class DnfBackend:
         if event_cb is not None:
             event_cb({"event": "log", "message": f"Resolving transaction for {description}..."})
         transaction = goal.resolve()
-        problems = list(transaction.get_problems() or [])
-        if problems:
-            return False, "\n".join(str(problem) for problem in problems)
+        # get_problems() returns a GoalProblem overview code (an int, 0 =
+        # no problem), not an iterable of problems -- list()'ing it raises
+        # TypeError as soon as there's an actual problem to report, which
+        # is exactly the case that most needs a readable error message.
+        if transaction.get_problems():
+            try:
+                logs = [str(log) for log in transaction.get_resolve_logs_as_strings() or []]
+            except Exception:
+                logs = []
+            return False, "\n".join(logs) if logs else "Transaction resolution failed."
 
         try:
             if event_cb is not None:
