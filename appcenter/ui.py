@@ -1680,8 +1680,16 @@ class MainWindow(Adw.ApplicationWindow):
         queue_title.add_css_class("title-4")
         box.append(queue_title)
 
+        # Package-level progress can create hundreds of rows. Keep their
+        # minimum height out of the window's size request; otherwise GTK can
+        # allocate a render surface tens of thousands of pixels tall.
+        self.queue_scroll = Gtk.ScrolledWindow()
+        self.queue_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.queue_scroll.set_min_content_height(120)
+        self.queue_scroll.set_vexpand(True)
         self.queue_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.append(self.queue_list_box)
+        self.queue_scroll.set_child(self.queue_list_box)
+        box.append(self.queue_scroll)
 
         log_title = Gtk.Label(label=_("Transaction log"), xalign=0)
         log_title.add_css_class("title-4")
