@@ -56,7 +56,7 @@ def save_updater_settings(settings: dict) -> None:
 
 from .i18n import _
 from .updater_config import load_updater_settings, save_updater_settings, VALID_UNITS, save_view_mode, get_view_mode
-from .models import AppEntry, should_hide_from_standard_catalog
+from .models import AppEntry, filter_search, search_sort_key, search_terms, should_hide_from_standard_catalog
 
 
 class _NewsHTMLToMarkupParser(HTMLParser):
@@ -2325,15 +2325,8 @@ class MainWindow(Adw.ApplicationWindow):
         show_local_filter = ((self.current_group == "categories") or (self.current_group == "system" and self.current_page in {"installed", "updates"})) and not bool(needle)
 
         if needle:
-            items = [
-                app for app in items
-                if needle in app.name.casefold()
-                or needle in app.summary.casefold()
-                or needle in app.description.casefold()
-                or any(needle in item.casefold() for item in app.categories)
-                or any(needle in item.casefold() for item in app.keywords)
-                or any(needle in item.casefold() for item in app.pkg_names)
-            ]
+            terms = search_terms(needle)
+            items = filter_search(items, terms, self._app_matches_search)
             if self.current_repo_filter != "__all__":
                 items = [app for app in items if self.current_repo_filter in app.repo_ids]
 
@@ -2350,7 +2343,7 @@ class MainWindow(Adw.ApplicationWindow):
                     merged.append(app)
                     seen_pkgs.update(app.pkg_names)
 
-            merged.sort(key=lambda item: self._search_rank_key(item, needle))
+            merged.sort(key=search_sort_key(terms, self._app_matches_search, self._search_rank_key))
             self._page_items_cache[cache_key] = list(merged)
             return list(merged)
         else:
@@ -2385,16 +2378,7 @@ class MainWindow(Adw.ApplicationWindow):
                     items = [app for app in items if self._has_category(app, sub)]
 
         if show_local_filter and self.current_category_filter_text:
-            local_needle = self.current_category_filter_text.casefold()
-            items = [
-                app for app in items
-                if local_needle in app.name.casefold()
-                or local_needle in app.summary.casefold()
-                or local_needle in app.description.casefold()
-                or any(local_needle in item.casefold() for item in app.categories)
-                or any(local_needle in item.casefold() for item in app.keywords)
-                or any(local_needle in item.casefold() for item in app.pkg_names)
-            ]
+            items = filter_search(items, search_terms(self.current_category_filter_text), self._app_matches_search)
 
         if self.current_repo_filter != "__all__":
             items = [app for app in items if self.current_repo_filter in app.repo_ids]
@@ -2402,6 +2386,16 @@ class MainWindow(Adw.ApplicationWindow):
         items.sort(key=lambda item: item.name.casefold())
         self._page_items_cache[cache_key] = list(items)
         return list(items)
+
+    def _app_matches_search(self, app: AppEntry, needle: str) -> bool:
+        return (
+            needle in app.name.casefold()
+            or needle in app.summary.casefold()
+            or needle in app.description.casefold()
+            or any(needle in item.casefold() for item in app.categories)
+            or any(needle in item.casefold() for item in app.keywords)
+            or any(needle in item.casefold() for item in app.pkg_names)
+        )
 
     def _search_rank_key(self, app: AppEntry, needle: str) -> tuple[int, int, int, str]:
         pkg_names = [pkg.casefold() for pkg in app.pkg_names if pkg]

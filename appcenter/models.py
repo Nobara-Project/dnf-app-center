@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable, Iterable
 
 
 @dataclass(slots=True)
@@ -27,6 +28,43 @@ class AppEntry:
     @property
     def primary_pkg(self) -> str | None:
         return self.pkg_names[0] if self.pkg_names else None
+
+
+def search_terms(text: str | None) -> list[str]:
+    """Split a search into words. Like `dnf search`, every word has to match, in any order."""
+    return str(text or "").casefold().split()
+
+
+def filter_search(
+    apps: Iterable[AppEntry],
+    terms: list[str],
+    matches: Callable[[AppEntry, str], bool],
+) -> list[AppEntry]:
+    """Keep the apps that match every word; each word narrows the results of the one before."""
+    items = list(apps)
+    for term in terms:
+        items = [app for app in items if matches(app, term)]
+    return items
+
+
+def search_sort_key(
+    terms: list[str],
+    matches: Callable[[AppEntry, str], bool],
+    rank_key: Callable[[AppEntry, str], tuple],
+) -> Callable[[AppEntry], tuple]:
+    """Return a sort key for a search. Results containing the whole search text come
+    first, in their usual order; results that only contain each word follow, ranked
+    by their worst-matching word."""
+    phrase = " ".join(terms)
+    if len(terms) == 1:
+        return lambda app: rank_key(app, phrase)
+
+    def key(app: AppEntry) -> tuple:
+        if matches(app, phrase):
+            return (0, rank_key(app, phrase))
+        return (1, max(rank_key(app, term) for term in terms))
+
+    return key
 
 
 def is_hidden_debug_package_name(name: str | None) -> bool:
