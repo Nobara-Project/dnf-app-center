@@ -1354,6 +1354,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.bottom_queue_status = Gtk.Label(xalign=0)
         self.bottom_queue_status.add_css_class("dim-label")
         self.bottom_queue_status.add_css_class("queue-bottom-status")
+        self.bottom_queue_status.set_ellipsize(Pango.EllipsizeMode.END)
+        self.bottom_queue_status.set_max_width_chars(48)
         bottom_bar.append(self.bottom_queue_status)
 
         queue_button = Gtk.Button(label=_("View Queue"))
@@ -1675,21 +1677,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.queue_progress = Gtk.ProgressBar()
         self.queue_progress.add_css_class("queue-progress")
         box.append(self.queue_progress)
-
-        queue_title = Gtk.Label(label=_("Queued actions"), xalign=0)
-        queue_title.add_css_class("title-4")
-        box.append(queue_title)
-
-        # Package-level progress can create hundreds of rows. Keep their
-        # minimum height out of the window's size request; otherwise GTK can
-        # allocate a render surface tens of thousands of pixels tall.
-        self.queue_scroll = Gtk.ScrolledWindow()
-        self.queue_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.queue_scroll.set_min_content_height(120)
-        self.queue_scroll.set_vexpand(True)
-        self.queue_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.queue_scroll.set_child(self.queue_list_box)
-        box.append(self.queue_scroll)
 
         log_title = Gtk.Label(label=_("Transaction log"), xalign=0)
         log_title.add_css_class("title-4")
@@ -3124,57 +3111,33 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.timeout_add(100, refresh)
 
     def _refresh_queue_page(self) -> None:
-        if not hasattr(self, "queue_list_box"):
+        if not hasattr(self, "bottom_queue_progress"):
             return
-        display = []
+        # Keep package state in the progress model, not in one widget per
+        # package. Mirror the overall bar on the Queue page and window footer.
+        fractions = []
         for item in self.queue_items:
             if item.package_progress:
-                for key, row in item.package_progress.rows.items():
-                    display.append(((id(item), key), row["nevra"] + " — " + row["action"],
-                                    item.package_progress.label(row), row["fraction"]))
+                fractions.extend(row["fraction"] for row in item.package_progress.rows.values())
             else:
-                display.append(((id(item), ""), item.display_name + " — " + item.action,
-                                item.message, 1.0 if item.status == "done" else 0.0))
-        total = len(display)
-        fraction = sum(row[3] for row in display) / total if total else 0.0
+                fractions.append(1.0 if item.status == "done" else 0.0)
+        total = len(fractions)
+        processed = sum(value == 1 for value in fractions)
+        fraction = sum(fractions) / total if total else 0.0
+        text = f"{processed}/{total} processed items" if total else "Queue empty"
         current = next((item for item in self.queue_items if item.status == "running"), None)
         if current is None and self.queue_items:
             current = self.queue_items[-1]
-        if current and current.package_progress:
-            _, text = current.package_progress.summary()
-        else:
-            text = f"{sum(row[3] == 1 for row in display)}/{total} complete" if total else "Queue empty"
+        phase = ""
+        if current:
+            phase = current.package_progress.phase if current.package_progress else current.message
         for bar in (self.queue_progress, self.bottom_queue_progress):
             bar.set_fraction(fraction)
             bar.set_show_text(True)
             bar.set_text(text)
         self.bottom_queue_revealer.set_reveal_child(total > 0)
-        self.bottom_queue_status.set_text(text)
-        # Update widgets in place: downloads can report many times per second.
-        # Rebuilding thousands of package cards per event stalls the GTK loop.
-        widgets = getattr(self, "_queue_widgets", {})
-        wanted = {row[0] for row in display}
-        for key in list(widgets):
-            if key not in wanted:
-                self.queue_list_box.remove(widgets.pop(key)[0])
-        for key, name, message, value in display:
-            if key not in widgets:
-                card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-                card.add_css_class("queue-item-card")
-                title = Gtk.Label(label=name, xalign=0)
-                title.set_ellipsize(Pango.EllipsizeMode.END)
-                title.set_tooltip_text(name)
-                title.add_css_class("heading")
-                bar = Gtk.ProgressBar()
-                bar.set_show_text(True)
-                card.append(title)
-                card.append(bar)
-                self.queue_list_box.append(card)
-                widgets[key] = (card, bar)
-            bar = widgets[key][1]
-            bar.set_fraction(value)
-            bar.set_text(message)
-        self._queue_widgets = widgets
+        self.bottom_queue_status.set_text(phase)
+        self.bottom_queue_status.set_tooltip_text(phase)
 
     def _get_queue_log_text(self) -> str:
         if getattr(self, "queue_log_full", None):

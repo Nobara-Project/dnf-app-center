@@ -1,4 +1,4 @@
-"""Package rows for one coordinated nobara-sync transaction (no GTK dependency)."""
+"""Package progress for one coordinated nobara-sync transaction (no GTK dependency)."""
 from __future__ import annotations
 
 
@@ -97,4 +97,4 @@ class UpdateProgress:
         total = len(self.rows)
         fraction = sum(row["fraction"] for row in self.rows.values()) / total if total else 0
         ready = sum(row["fraction"] == 1 for row in self.rows.values())
-        return fraction, f"{self.phase}: {ready}/{total} packages"
+        return fraction, f"{self.phase}: {ready}/{total} processed items"
