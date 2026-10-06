@@ -475,6 +475,12 @@ windowhandle > box.top-bar {
 .app-list-row {
   margin: 4px 0;
 }
+.app-grid > flowboxchild,
+.app-grid > flowboxchild:hover,
+.app-grid > flowboxchild:active {
+  padding: 0;
+  background: transparent;
+}
 .app-card {
   padding: 10px 14px;
   border-radius: 14px;
@@ -1069,6 +1075,9 @@ class AppCardTile(Gtk.Box):
         self.title_label.set_wrap(False)
         self.title_label.set_single_line_mode(True)
         self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
+        # The tile's 300px size request, not the text, sets its natural width,
+        # so the grid reflows 3 -> 2 -> 1 columns at fixed tile sizes.
+        self.title_label.set_max_width_chars(0)
         self.title_label.set_text(app.name)
         text_col.append(self.title_label)
 
@@ -1077,7 +1086,7 @@ class AppCardTile(Gtk.Box):
         self.summary_label.set_wrap(True)
         self.summary_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self.summary_label.set_lines(2)
-        self.summary_label.set_max_width_chars(22)
+        self.summary_label.set_max_width_chars(0)
         self.summary_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.summary_label.set_text(app.summary)
         text_col.append(self.summary_label)
@@ -1156,6 +1165,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.subcategory_button_pages: dict[str, int] = {}
         self.subcategory_pages: list[list[tuple[str, str]]] = []
         self.current_subcategory_page = 0
+        self._subcat_repaginate_pending = False
         self._page_items_cache: dict[tuple, list[AppEntry]] = {}
         self._data_revision = 0
         self.view_mode = "grid"  # Can be "grid" or "list"
@@ -1215,6 +1225,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.title_label = Gtk.Label(xalign=0)
         self.title_label.add_css_class("title-1")
+        self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.title_label.set_hexpand(False)
         self.title_label.set_halign(Gtk.Align.START)
         self.title_row.append(self.title_label)
@@ -1257,9 +1268,15 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.status_label = Gtk.Label(xalign=0)
         self.status_label.add_css_class("dim-label")
+        self.status_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.content_header_box.append(self.status_label)
 
-        self.updates_action_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        if hasattr(Adw, "WrapBox"):  # libadwaita >= 1.7
+            # Wrap onto a second line instead of forcing a wide window
+            # (translated, this bar is ~950px wide in French).
+            self.updates_action_bar = Adw.WrapBox(child_spacing=8, line_spacing=4)
+        else:
+            self.updates_action_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.updates_action_bar.add_css_class("updates-action-bar")
         self.updates_action_bar.set_visible(False)
         self.content_header_box.append(self.updates_action_bar)
@@ -1326,7 +1343,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.subcategory_stack.set_hexpand(True)
         self.subcategory_stack.set_halign(Gtk.Align.FILL)
         self.subcategory_stack.set_valign(Gtk.Align.CENTER)
-        self.subcategory_frame.append(self.subcategory_stack)
+        # Pages are sized for the current width; don't let them set the window's
+        # minimum width. Re-paginate when the strip width changes instead.
+        self.subcategory_scroller = Gtk.ScrolledWindow()
+        self.subcategory_scroller.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.NEVER)
+        self.subcategory_scroller.set_hexpand(True)
+        self.subcategory_scroller.set_child(self.subcategory_stack)
+        self.subcategory_scroller.get_hadjustment().connect("notify::page-size", self._on_subcategory_width_changed)
+        self.subcategory_frame.append(self.subcategory_scroller)
 
         self.subcat_right_button = Gtk.Button.new_from_icon_name("pan-end-symbolic")
         self.subcat_right_button.add_css_class("pan-button")
@@ -1334,6 +1358,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.subcategory_strip.append(self.subcat_right_button)
 
         self.stack = Gtk.Stack()
+        # Only the visible page may set the minimum width; otherwise the hidden
+        # grid page keeps the window wide on Queue/Repositories/Details.
+        self.stack.set_hhomogeneous(False)
         self.stack.set_hexpand(True)
         self.stack.set_vexpand(True)
         self.content_box.append(self.stack)
@@ -1465,6 +1492,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.repo_filter_combo.set_active_id("__all__")
         self.repo_filter_combo.connect("changed", self._on_repo_filter_changed)
         self.repo_filter_combo.set_size_request(220, -1)
+        for cell in self.repo_filter_combo.get_cells():
+            cell.set_property("ellipsize", Pango.EllipsizeMode.END)
         bar.append(self.repo_filter_combo)
 
         spacer = Gtk.Box()
@@ -2015,6 +2044,19 @@ class MainWindow(Adw.ApplicationWindow):
         self._highlight_subcategory_button()
         self._set_subcategory_page(self.subcategory_button_pages.get("__all__", 0), animate=False)
 
+    def _on_subcategory_width_changed(self, *_args) -> None:
+        if self.subcategory_pages and not self._subcat_repaginate_pending:
+            self._subcat_repaginate_pending = True
+            GLib.idle_add(self._repaginate_subcategories)
+
+    def _repaginate_subcategories(self) -> bool:
+        self._subcat_repaginate_pending = False
+        entries = [entry for page in self.subcategory_pages for entry in page]
+        if entries and self._paginate_subcategories(entries) != self.subcategory_pages:
+            self._rebuild_subcategories()
+            self._highlight_subcategory_button()
+        return GLib.SOURCE_REMOVE
+
     def _paginate_subcategories(self, entries: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
         available_width = self._subcategory_page_width()
         pages: list[list[tuple[str, str]]] = []
@@ -2037,6 +2079,10 @@ class MainWindow(Adw.ApplicationWindow):
         return pages or [entries]
 
     def _subcategory_page_width(self) -> int:
+        strip_width = self.subcategory_scroller.get_width()
+        if strip_width > 0:
+            return max(160, strip_width - 12)
+
         window_width = 0
         try:
             window_width = int(self.get_width())
@@ -2236,6 +2282,12 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             visible_before, scroll_before = None, 0.0
         in_search_mode = bool(self.current_search_text)
+        if not in_search_mode and self.current_group == "system" and self.current_page in {"repositories", "queue"}:
+            # Grid/list toggle, local filter and news toggle only apply to app lists.
+            self.category_filter_entry.set_visible(False)
+            self.view_toggle_box.set_visible(False)
+            self.news_toggle_button.set_visible(False)
+            self.updates_action_bar.set_visible(False)
         if not in_search_mode and self.current_group == "system" and self.current_page == "repositories":
             self.title_label.set_text(CATEGORY_GROUPS["system"]["repositories"])
             self.status_label.set_text(f"Showing {len(getattr(self, 'repos', []))} repositories.")
@@ -2469,8 +2521,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         update_mode = self.current_group == "system" and self.current_page == "updates" and not self.current_search_text
         compact_grid = (self.view_mode == "grid")
-        cols = 3
-        # Chunk size must be a multiple of cols so grid rows are never split across batches
         chunk_size = 30
 
         def make_row(app: AppEntry) -> AppCardRow:
@@ -2484,29 +2534,34 @@ class MainWindow(Adw.ApplicationWindow):
                 update_toggle_cb=self._toggle_update_selection if update_mode else None,
             )
 
-        def make_tile_row(chunk: list[AppEntry]) -> Gtk.ListBoxRow:
-            row = Gtk.ListBoxRow()
-            row.set_activatable(False)
-            row.set_selectable(False)
-            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            row_box.set_homogeneous(True)
-            for app in chunk:
-                tile = AppCardTile(
-                    app,
-                    (lambda entry, mode=("update" if update_mode else None): self._run_action_for_app(entry, mode)),
-                    self._open_details,
-                    self._queued_state_label,
-                    page_mode=("updates" if update_mode else "default"),
-                    update_selected=(app.primary_pkg in self.update_selection if app.primary_pkg else False),
-                    update_toggle_cb=self._toggle_update_selection if update_mode else None,
-                )
-                row_box.append(tile)
-            for _ in range(cols - len(chunk)):
-                spacer = Gtk.Box()
-                spacer.set_hexpand(True)
-                row_box.append(spacer)
-            row.set_child(row_box)
-            return row
+        def make_tile(app: AppEntry) -> AppCardTile:
+            return AppCardTile(
+                app,
+                (lambda entry, mode=("update" if update_mode else None): self._run_action_for_app(entry, mode)),
+                self._open_details,
+                self._queued_state_label,
+                page_mode=("updates" if update_mode else "default"),
+                update_selected=(app.primary_pkg in self.update_selection if app.primary_pkg else False),
+                update_toggle_cb=self._toggle_update_selection if update_mode else None,
+            )
+
+        grid_flow = None
+        if compact_grid:
+            # Up to 3 columns, reflowing to 2 and then 1 as the window narrows.
+            grid_flow = Gtk.FlowBox()
+            grid_flow.add_css_class("app-grid")
+            grid_flow.set_selection_mode(Gtk.SelectionMode.NONE)
+            grid_flow.set_homogeneous(True)
+            grid_flow.set_min_children_per_line(1)
+            grid_flow.set_max_children_per_line(3)
+            grid_flow.set_column_spacing(8)
+            grid_flow.set_row_spacing(4)
+            grid_flow.set_valign(Gtk.Align.START)
+            grid_row = Gtk.ListBoxRow()
+            grid_row.set_activatable(False)
+            grid_row.set_selectable(False)
+            grid_row.set_child(grid_flow)
+            self.listbox.append(grid_row)
 
         def add_chunk(start: int) -> bool:
             if self._listbox_gen != gen:
@@ -2516,8 +2571,8 @@ class MainWindow(Adw.ApplicationWindow):
                 for i in range(start, end):
                     self.listbox.append(make_row(items[i]))
             else:
-                for i in range(start, end, cols):
-                    self.listbox.append(make_tile_row(items[i:i + cols]))
+                for i in range(start, end):
+                    grid_flow.append(make_tile(items[i]))
             if end < len(items):
                 GLib.idle_add(add_chunk, end, priority=GLib.PRIORITY_LOW)
             return GLib.SOURCE_REMOVE
