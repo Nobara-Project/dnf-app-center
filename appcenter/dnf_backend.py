@@ -412,9 +412,15 @@ class DnfBackend:
             install_only_names = getattr(self.base.get_config(), "installonlypkgs", [])
         except Exception:
             install_only_names = []
+        # installonlypkgs also names things like kernel-PAE or
+        # installonlypkg(vm) that match nothing on most systems, and excluded
+        # kernels match nothing either. Without skip_unavailable every miss
+        # sets a NOT_FOUND/EXCLUDED problem and the whole check looks failed.
+        settings = self.libdnf5.base.GoalJobSettings()
+        settings.set_skip_unavailable(True)
         for name in install_only_names or []:
             try:
-                goal.add_upgrade(name)
+                goal.add_upgrade(name, settings)
             except Exception:
                 pass
 
@@ -422,11 +428,10 @@ class DnfBackend:
             transaction = goal.resolve()
         except Exception:
             return None
-        try:
-            if list(transaction.get_problems() or []):
-                return None
-        except Exception:
-            pass
+        # get_problems() returns a GoalProblem overview code (an int, 0 = no
+        # problem), not an iterable.
+        if transaction.get_problems():
+            return None
         return transaction
 
     def _iter_transaction_packages(self, transaction) -> list:
@@ -1114,9 +1119,16 @@ class DnfBackend:
         if event_cb is not None:
             event_cb({"event": "log", "message": f"Resolving transaction for {description}..."})
         transaction = goal.resolve()
-        problems = list(transaction.get_problems() or [])
-        if problems:
-            return False, "\n".join(str(problem) for problem in problems)
+        # get_problems() returns a GoalProblem overview code (an int, 0 =
+        # no problem), not an iterable of problems -- list()'ing it raises
+        # TypeError as soon as there's an actual problem to report, which
+        # is exactly the case that most needs a readable error message.
+        if transaction.get_problems():
+            try:
+                logs = [str(log) for log in transaction.get_resolve_logs_as_strings() or []]
+            except Exception:
+                logs = []
+            return False, "\n".join(logs) if logs else "Transaction resolution failed."
 
         try:
             if event_cb is not None:
