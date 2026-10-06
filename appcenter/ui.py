@@ -1882,7 +1882,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._rebuild_repo_page()
         self._populate_repo_filter_dropdown()
         self._switch_page(self.current_group, self.current_page)
-        if self.queue_items and not self.queue_worker_running:
+        if not self.queue_worker_running and any(
+                item.action == "install-rpms" and item.status == "queued" for item in self.queue_items):
             GLib.idle_add(self._prompt_install)
         return False
 
@@ -3281,13 +3282,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay.add_toast(Adw.Toast(title=message[:300]))
         
     def _prompt_install(self) -> bool:
-        if not self.queue_items or self.queue_worker_running:
+        # Updates and repository actions were authorized by their buttons.
+        # Only opening/dropping local RPM files needs this confirmation;
+        # retained update results are history, not pending installations.
+        pending = [item for item in self.queue_items if item.action == "install-rpms" and item.status == "queued"]
+        if not pending or self.queue_worker_running:
             return False
+        file_count = sum(len(item.file_paths) for item in pending)
 
         dialog = Adw.MessageDialog(
             transient_for=self,
             heading=_("Confirm Installation"),
-            body=f"You have {len(self.queue_items)} package(s) ready. Do you want to install them?",
+            body=f"You have {file_count} RPM file(s) ready. Do you want to install them?",
         )
 
         dialog.add_response("cancel", _("Cancel"))
@@ -3302,7 +3308,9 @@ class MainWindow(Adw.ApplicationWindow):
             if response == "install":
                 self._start_queue_worker()
             else:
-                self.queue_items.clear()
+                pending_ids = {id(item) for item in pending}
+                self.queue_items = [item for item in self.queue_items
+                                    if id(item) not in pending_ids or item.status != "queued"]
                 self._refresh_queue_page()
 
         dialog.connect("response", on_response)
