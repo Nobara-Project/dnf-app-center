@@ -13,7 +13,7 @@ import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 
-from .models import AppEntry
+from .models import AppEntry, filter_search, search_sort_key, search_terms
 from . import update_output
 
 
@@ -572,20 +572,22 @@ class DnfBackend:
         return None
 
     def search_packages(self, query: str, repo_id: str = "__all__", limit: int = 200) -> list[AppEntry]:
-        needle = (query or "").strip().casefold()
-        if not needle:
+        terms = search_terms(query)
+        if not terms:
             return []
         cache = self._build_package_search_cache()
-        items = [
-            app for app in cache.values()
-            if (needle in app.name.casefold())
-            or (needle in app.summary.casefold())
-            or any(needle in pkg.casefold() for pkg in app.pkg_names)
-        ]
+        items = filter_search(cache.values(), terms, self._package_matches_search)
         if repo_id != "__all__":
             items = [app for app in items if repo_id in app.repo_ids]
-        items.sort(key=lambda app: self._package_search_rank_key(app, needle))
+        items.sort(key=search_sort_key(terms, self._package_matches_search, self._package_search_rank_key))
         return items[:limit]
+
+    def _package_matches_search(self, app: AppEntry, needle: str) -> bool:
+        return (
+            (needle in app.name.casefold())
+            or (needle in app.summary.casefold())
+            or any(needle in pkg.casefold() for pkg in app.pkg_names)
+        )
 
     def _build_package_search_cache(self) -> dict[str, AppEntry]:
         if self._package_search_cache is not None:
