@@ -10,8 +10,10 @@ import sys
 
 if __package__:
     from . import update_output
+    from .proxy import proxy_environment
 else:
     import update_output
+    from proxy import proxy_environment
 
 def _force_user_env():
     """Extracts --user-home from sys.argv before formal parsing to fix HOME immediately."""
@@ -425,18 +427,20 @@ def _handle_command(libdnf5, base, payload: dict) -> bool:
     pkg_names = payload.get("pkg_names")
     if not isinstance(pkg_names, list):
         pkg_names = [str(payload.get("pkg_name") or "")]
+    if action != "system-update" and base is None:
+        backend, error = _build_backend()
+        if error is not None:
+            emit("result", **error)
+            return True
+        libdnf5, base = backend
     ok, message = _run_transaction(libdnf5, base, action, [str(pkg) for pkg in pkg_names if pkg])
     emit("result", ok=ok, message=message)
     return True
 
 
 def server_main() -> int:
-    backend, error = _build_backend()
-    if error is not None:
-        print(json.dumps(error), flush=True)
-        return 1
-
-    libdnf5, base = backend
+    # Authenticate first, then read the request's proxy settings before any
+    # metadata access. System updates let nobara-sync load its own repositories.
     emit("ready", message="Privileged helper ready")
     for raw_line in sys.stdin:
         line = raw_line.strip()
@@ -447,8 +451,14 @@ def server_main() -> int:
         except Exception as exc:
             emit("result", ok=False, message=f"Invalid helper payload: {exc}")
             continue
-        if not _handle_command(libdnf5, base, payload):
-            break
+        try:
+            if not isinstance(payload, dict):
+                raise ValueError("Helper payload must be an object.")
+            with proxy_environment(payload.get("proxies")):
+                if not _handle_command(None, None, payload):
+                    break
+        except Exception as exc:
+            emit("result", ok=False, message=str(exc))
     return 0
 
 

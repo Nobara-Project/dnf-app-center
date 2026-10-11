@@ -131,3 +131,17 @@ That value becomes the default `update_feed_url` used when the user has not over
 
 This project is distributed under the terms of the GNU General Public License version 2.
 See `COPYING` for the full license text.
+## Proxy connections
+
+App Center uses proxy environment variables inherited when it starts, including
+`http_proxy`, `https_proxy`, `all_proxy` and `no_proxy`. For example:
+
+```sh
+https_proxy=http://127.0.0.1:3128 dnf-app-center
+```
+
+Validated proxy settings are passed through authorization to package operations
+and `nobara-sync` over a private connection. They are not included in command
+arguments, and the privileged helper does not retain them between operations.
+System updates require an updater build with proxy support. Desktop proxy
+preferences and PAC files are not imported automatically.

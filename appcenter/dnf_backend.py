@@ -15,6 +15,7 @@ from gi.repository import Gio
 
 from .models import AppEntry
 from . import update_output
+from .proxy import proxy_settings
 
 
 class DnfUnavailable(RuntimeError):
@@ -972,6 +973,12 @@ class DnfBackend:
         return False, message or f"Privileged helper exited with code {proc.returncode}."
 
     def _run_privileged_helper_payload(self, payload: dict, event_cb: Callable[[dict], None] | None = None) -> tuple[bool, str]:
+        # Credentials travel over the helper's private stdin pipe, never argv.
+        proxies, refused = proxy_settings(os.environ)
+        if event_cb is not None:
+            for name in refused:
+                event_cb({"event": "log", "message": f"Ignoring invalid proxy setting: {name}."})
+        payload = dict(payload, proxies=proxies)
         with self._helper_lock:
             cached_mode = bool(self.cache_authorization)
             proc = self._helper_proc if cached_mode else None
