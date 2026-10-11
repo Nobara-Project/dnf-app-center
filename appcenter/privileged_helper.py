@@ -11,9 +11,11 @@ import sys
 if __package__:
     from . import update_output
     from .proxy import proxy_environment
+    from .repositories import load_repositories
 else:
     import update_output
     from proxy import proxy_environment
+    from repositories import load_repositories
 
 def _force_user_env():
     """Extracts --user-home from sys.argv before formal parsing to fix HOME immediately."""
@@ -39,19 +41,17 @@ def _build_backend():
     except Exception as exc:
         return None, {"ok": False, "message": f"Could not import libdnf5: {exc}"}
 
-    base = libdnf5.base.Base()
-    base.load_config()
-    config = base.get_config()
-    config.metadata_expire = 0
-    base.setup()
+    def create_base():
+        base = libdnf5.base.Base()
+        base.load_config()
+        config = base.get_config()
+        config.metadata_expire = 0
+        base.setup()
 
-    repo_sack = base.get_repo_sack()
-    repo_sack.create_repos_from_system_configuration()
-    try:
-        repo_sack.load_repos()
-    except TypeError:
-        repo_sack.load_repos(True)
-    return (libdnf5, base), None
+        repo_sack = base.get_repo_sack()
+        repo_sack.create_repos_from_system_configuration()
+        return base
+    return (libdnf5, load_repositories(create_base)), None
 
 
 def _transaction_success_value(libdnf5):

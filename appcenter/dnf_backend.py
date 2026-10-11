@@ -16,6 +16,7 @@ from gi.repository import Gio
 from .models import AppEntry
 from . import update_output
 from .proxy import proxy_settings
+from .repositories import load_repositories
 
 
 class DnfUnavailable(RuntimeError):
@@ -54,28 +55,26 @@ class DnfBackend:
         self.reload_state()
 
     def _create_base(self, force_refresh: bool = False):
-        base = self.libdnf5.base.Base()
-        base.load_config()
-        base.setup()
+        def create_base():
+            base = self.libdnf5.base.Base()
+            base.load_config()
+            base.setup()
 
-        repo_sack = base.get_repo_sack()
-        repo_sack.create_repos_from_system_configuration()
-        if force_refresh:
-            repo_query = self.libdnf5.repo.RepoQuery(base)
-            try:
-                repo_query.filter_enabled(True)
-            except Exception:
-                pass
-            for repo in repo_query:
+            repo_sack = base.get_repo_sack()
+            repo_sack.create_repos_from_system_configuration()
+            if force_refresh:
+                repo_query = self.libdnf5.repo.RepoQuery(base)
                 try:
-                    repo.expire()
+                    repo_query.filter_enabled(True)
                 except Exception:
                     pass
-        try:
-            repo_sack.load_repos()
-        except TypeError:
-            repo_sack.load_repos(True)
-        return base
+                for repo in repo_query:
+                    try:
+                        repo.expire()
+                    except Exception:
+                        pass
+            return base
+        return load_repositories(create_base)
 
     def reload_state(self, force_refresh: bool = False) -> None:
         self.base = self._create_base(force_refresh=force_refresh)
