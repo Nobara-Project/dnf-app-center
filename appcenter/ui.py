@@ -1149,6 +1149,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.queue_logs: list[str] = []
         self.queue_log_full: list[str] = []
         self.queue_worker_running = False
+        self._reboot_in_progress = False
         self.current_queue_item: QueueItem | None = None
         self._appstream_pkg_names: set[str] = set()
         self.nav_buttons: dict[str, Gtk.Button] = {}
@@ -1703,6 +1704,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.send_paste_button = Gtk.Button(label=_("Send to pastebin"))
         self.send_paste_button.connect("clicked", self._on_send_to_pastebin)
         queue_actions.append(self.send_paste_button)
+        self.reboot_button = Gtk.Button(label=_("Reboot"))
+        self.reboot_button.set_sensitive(False)
+        self.reboot_button.set_tooltip_text(_("Available when an update has finished and requires a restart."))
+        self.reboot_button.connect("clicked", self._on_reboot_clicked)
+        queue_actions.append(self.reboot_button)
         box.append(queue_actions)
 
         self._refresh_queue_page()
@@ -3112,6 +3118,8 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.timeout_add(100, refresh)
 
     def _refresh_queue_page(self) -> None:
+        if hasattr(self, "reboot_button"):
+            self.reboot_button.set_sensitive(self._can_reboot())
         if not hasattr(self, "bottom_queue_progress"):
             return
         # Keep package state in the progress model, not in one widget per
@@ -3232,6 +3240,46 @@ class MainWindow(Adw.ApplicationWindow):
             self._show_toast(_("No transaction log available yet."))
             return
         self._show_text_popup(_("Transaction log"), text)
+
+    def _can_reboot(self) -> bool:
+        # A result can arrive before the helper exits or while other queued
+        # operations are pending. Never offer a restart during that work.
+        if self._reboot_in_progress or self.queue_worker_running:
+            return False
+        if any(item.status in {"queued", "running"} for item in self.queue_items):
+            return False
+        latest = next((item for item in reversed(self.queue_items) if item.action == "system-update"), None)
+        return bool(latest and latest.status == "done" and latest.update_result.get("reboot_required") is True)
+
+    def _on_reboot_clicked(self, _button: Gtk.Button) -> None:
+        if not self._can_reboot():
+            return
+        self._reboot_in_progress = True
+        self.reboot_button.set_sensitive(False)
+        try:
+            # Use the normal logind/polkit restart path, respecting inhibitors.
+            # Run asynchronously so authentication cannot freeze the window.
+            process = Gio.Subprocess.new(["systemctl", "reboot"],
+                                         Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE)
+            process.communicate_utf8_async(None, None, self._reboot_finished)
+        except GLib.Error as error:
+            self._reboot_failed(str(error))
+
+    def _reboot_finished(self, process: Gio.Subprocess, result: Gio.AsyncResult) -> None:
+        try:
+            _ok, stdout, stderr = process.communicate_utf8_finish(result)
+            if process.get_successful():
+                self._show_toast(_("Restart requested."))
+                return
+            message = (stderr or stdout or _("The system could not restart.")).strip()
+        except GLib.Error as error:
+            message = str(error)
+        self._reboot_failed(message)
+
+    def _reboot_failed(self, message: str) -> None:
+        self._reboot_in_progress = False
+        self._refresh_queue_page()
+        self._show_info_popup(_("Unable to reboot"), message)
 
     def _on_send_to_pastebin(self, _button: Gtk.Button) -> None:
         text = self._get_queue_log_text().strip()
